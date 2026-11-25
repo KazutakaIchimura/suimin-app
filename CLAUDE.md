@@ -21,6 +21,9 @@
 - Mac がないため、iOS のビルドは EAS Build（クラウド）で行う。iPhone 実機に入れるには Apple Developer Program（年 $99）の登録が要る（登録するかは[要相談]）
 - 開発コンテナで行うのは、コードの作成・単体テスト・中間テスト・静的解析まで。ヘルスケア・アラームはエミュレータ・実機でしか確かめられないため、E2E はコンテナ内では実行しない
 - パッケージの追加は `npm install` ではなく `npx expo install <パッケージ名>` を使う（Expo SDK と互換性のあるバージョンが選ばれるため）
+- Expo の API は SDK ごとに名前や使い方が変わる。Expo・EAS・React Native の API を使うコードを書く前に、`package.json` の `expo` のメジャーバージョンに対応するドキュメント（`https://docs.expo.dev/versions/v58.0.0/`）を確認する。記憶で書かない
+- `ios/` `android/` は Expo が自動生成する（コミットしない・手で編集しない）。ネイティブの設定は `app.json` とプラグインで行う
+- 作業フォルダは WSL のファイルシステム上に置く（Windows のドライブ上だと `npm install` が極端に遅くなるため）
 
 ## ディレクトリ構成
 
