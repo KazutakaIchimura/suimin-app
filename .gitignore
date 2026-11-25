@@ -21,3 +21,22 @@ Thumbs.db
 # PR本文の下書き（create-pr スキルが作成。投稿用の一時ファイルなのでコミットしない）
 docs/pr/*
 !docs/pr/.gitkeep
+
+# Expo / React Native
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+coverage/
+*.tsbuildinfo
+
+# ネイティブフォルダ（Expo の prebuild で生成するためコミットしない）
+/ios
+/android
+
+# 署名鍵
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
