@@ -76,12 +76,12 @@
   - 初回（同期記録なし）：`now − 90日` 〜 `now`
   - 2回目以降：開始 ＝ `min(前回の同期開始時刻, now − 7日)`。ただし `now − 90日` より前にはしない（`max` を取る）
   - 前回の同期開始時刻が未来（端末の時計を戻した）の場合も、上の式のとおり `now − 7日` からになる
-- ヘルスケアからは「取り込み範囲の開始 − 24時間」〜 `now` の期間と**重なる**セグメントを読む（iOS は `filter.date` の `startDate`/`endDate`、Android は `timeRangeFilter` の `between` を使う。どちらも期間と重なる記録を返す前提で、I3 で渡す引数を確かめ、実機の挙動は E2E で確かめる）。24時間さかのぼるのは、範囲の開始をまたぐ睡眠を途中で切らずに組み立てるため
+- ヘルスケアからは「取り込み範囲の開始 − 24時間」〜 `now` の期間と**重なる**セグメントを読む（iOS は `filter.date` の `startDate`/`endDate`、Android は `timeRangeFilter` の `between` を使う。どちらも期間と重なる記録を返す前提で、I3 で渡す引数を確かめる。重なりの扱いで結果が変わるのは、読み取り開始の24時間さかのぼりを超える長さ（24時間超）の睡眠だけで、それは想定しないため、実機での確認は E2E の対象にしない）。24時間さかのぼるのは、範囲の開始をまたぐ睡眠を途中で切らずに組み立てるため
 - 組み立てた睡眠のうち、起床時刻が取り込み範囲の開始**以降**（開始ちょうどを含む）のものだけを採用する
 - 「セグメントの件数」は、有効なセグメント（ステージへの変換で `inBed` を読み捨て、長さ0以下を捨てたあと）で数える。`inBed` だけ・長さ0のものだけが返ったときは0件として扱う
 - セグメントが1件以上あれば、組み立て後に採用する睡眠が0件（24時間さかのぼった部分にしかない・覚醒だけ など）でも入れ替えを行う。範囲内の DB の睡眠は消え、同期記録は更新される（ヘルスケアから正しく読めており、範囲内に睡眠がないことが確かなため）
 - ヘルスケアから読んだセグメントが0件なら、DB の入れ替えも同期記録の更新もしない（成功扱いで終える）。iOS は許可を取り消されても例外にならず0件を返すため、貯めた履歴を消さないようにする。代わりに、ヘルスケア側で取り込み範囲の睡眠を全部消した場合は反映されない（スコープ外に記載）
-- 連携状態の取得・同期の実行と重複防止は store の操作が持ち、連携状態・許可・設定・同期のサービスを呼ぶのは store の操作だけにする（一覧・詳細の読み取りの窓口は、それぞれのフックが呼ぶ）。1回の操作（`sync()` など）の中では同じ `requestId` を使う。操作の中身は次のとおり
+- 連携状態の取得・同期の実行と重複防止は store の操作が持ち、連携状態・許可・設定・同期のサービスを呼ぶのは store の操作だけにする（一覧・詳細の読み取りの窓口は、それぞれのフックが呼ぶ）。1回の操作（`sync()` など）の中では同じ `requestId` を使う。`requestAccess()` と、そのあとに始める `sync()` は別の操作として、それぞれ `requestId` を作る。操作の中身は次のとおり
   - `refreshAccess()`：連携状態を取得して store に入れる。取得中にもう一度呼ばれたら、実行中のものの完了を待って終わる（同時に2回取得しない）
   - `sync()`：`refreshAccess()` を呼び、`ready` なら同期サービスを呼ぶ。同期中にもう一度呼ばれたら、実行中のものの完了を待って終わる。起動・前面復帰・下に引く・同期の再試行・`checkFailed` の再試行は、すべてこれを呼ぶ
   - `requestAccess()`：許可を要求し、成功したら新しい `sync()` を始める。そのとき実行中の `sync()` があれば、合流せずに完了を待ってから、改めて連携状態の取得から始める（許可の前に読んだ古い連携状態で終わらないようにするため）。連携状態の取得はこの新しい `sync()` の中の1回だけ
@@ -130,6 +130,7 @@
   - iOS：「睡眠データがありません。許可していない場合は、設定 → ヘルスケア → データアクセスとデバイス → suimin-app で睡眠を許可してください。SOXAI アプリのヘルスケア連携も確認してください」
   - Android：「睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください」
 - 同期に失敗したとき：画面上部に「睡眠データの取り込みに失敗しました」と「再試行」ボタンを出し、DB にあるデータは表示し続ける。DB が空なら、失敗の表示と「睡眠データがありません」の案内を両方出す
+- 同期の失敗表示は、連携状態が `ready` のときだけ出す。同期の失敗のあと連携状態が `ready` 以外に変わったら、その状態の案内だけを出す（同期できない状態では、案内のほうが次にすることにつながるため）
 - 連携状態が `ready` 以外でも、DB に睡眠があれば一覧・詳細は表示する（案内は一覧の上に出す）。Android で後から許可を取り消した場合なども、貯めた履歴を見られるようにする
 - DB からの読み取り（一覧・詳細）に失敗したとき：「睡眠データを読み込めませんでした」と「再試行」ボタン（読み取りをやり直す）を出す
 - OS の判定（`Platform.OS`）は受け口層（フック・store）だけが読み、サービス層の関数へ引数（`os: 'ios' | 'android'`）で渡す。サービス層はそれをヘルスケアのリポジトリへ渡し、リポジトリはその値で iOS／Android の実装を切り替える（architecture.md の「サービス層・リポジトリ層は `react-native` を import しない」と「リポジトリ層の中で OS により切り替える」を両方満たすため）
@@ -209,7 +210,7 @@
 | `src/features/sleep-record/sleep-record-day.service.ts` | サービス（純粋） | 睡眠の一覧から、日ごとの要約（一覧用）と1日の詳細（主睡眠・昼寝・ステージ内訳）を作る |
 | `src/features/sleep-record/sleep-record-date.service.ts` | サービス（純粋） | 詳細画面の日付パラメータを検証し、正しい帰属日（`YYYY-MM-DD`）か不正かを返す |
 | `src/features/sleep-record/sleep-record-guide.service.ts` | サービス（純粋） | 連携状態・OS・睡眠の有無・同期中か・同期失敗の有無から、表示する案内の一覧を決める |
-| `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 表示用の整形（分→「7時間32分」、時刻→「23:14」、日付→「11月25日（火）」） |
+| `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 表示用の整形（分→「7時間32分」、時刻→「23:14」、日付→「11月25日（水）」） |
 | `src/features/sleep-record/sleep-record-sync-range.service.ts` | サービス（純粋） | 取り込み範囲（開始・ヘルスケアの読み取り開始）の計算と、起床時刻による採用の判定 |
 | `src/features/sleep-record/sleep-record-sync.service.ts` | サービス | 同期の実行（範囲の計算 → ヘルスケアの読み取り → 組み立て → DB の入れ替え）。`os`・`requestId`・現在時刻を返す関数 `getNow`（受け口層が `@/lib/clock` を渡す）を引数で受け取る。同期開始時刻とログの `ms` は `getNow` で測る |
 | `src/features/sleep-record/sleep-record-access.service.ts` | サービス | 連携状態の取得・許可の要求・設定を開く、の窓口（失敗はログを出して投げ直す） |
@@ -230,7 +231,7 @@
   - `react-native` の `Platform.OS`・`AppState`（OS の切り替え・前面復帰の再現。読むのはフックと store だけ）
   - `@/drizzle/migrations` → 適用できない壊れた SQL を含むマイグレーション（I4-11 でマイグレーションの失敗を起こすときだけ。DB への入力データの差し替えであり、アプリのロジックは差し替えない）
 - I4 では `jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] })` と `jest.setSystemTime()` で現在時刻を固定する（`@/lib/clock` は実時計を返すため、取り込み範囲とシードの起床時刻が実行日で変わらないようにする。Promise と RNTL の `waitFor`・`findBy*` が止まらないよう、`Date` とタイマー以外は偽装しない）
-- 「同期サービスが何回呼ばれたか」「同期中」は、アプリ内のサービスを差し替えずに確かめる。回数はネイティブライブラリの読み取り関数（`queryCategorySamples`・`readRecords`）が呼ばれた回数で数え、同期中の状態はそのモックが返す Promise を保留にして作る
+- 「同期サービスが何回呼ばれたか」「同期中」は、アプリ内のサービスを差し替えずに確かめる。I4-13b の `requestId` だけは、中身を差し替えない `jest.spyOn`（本物の処理をそのまま動かし、渡った引数を見るだけ）で、連携状態の窓口と同期サービスに渡る値を確かめる。回数はネイティブライブラリの読み取り関数（`queryCategorySamples`・`readRecords`）が呼ばれた回数で数え、同期中の状態はそのモックが返す Promise を保留にして作る
 - 画面遷移と起動時の URL は `expo-router/testing-library` の `renderRouter` で、実際の `src/app/` のルートを読み込んで確かめる
 - DB の読み取り失敗は、テスト用DB（一時ファイルの SQLite）を閉じて起こし、再試行の前に同じファイルを開き直す。DB リポジトリは呼び出しのたびに `@/lib/db` から DB を取得する（保持し続けない）ので、開き直した DB が使われる
 - `drizzle-orm/expo-sqlite/migrator` の `useMigrations` が better-sqlite3 の DB で動くかは、手順12の最初に確かめる。動かなければ作業を止めて、I4-11 の確かめ方を相談する
@@ -243,11 +244,11 @@
 | `src/app/sleep/[date].tsx` | `date` パラメータを渡して `SleepRecordDetailScreen` を描画するだけ |
 
 ### 3.4 表示の仕様
-- 時間は「7時間32分」「45分」「0分」（1時間以上なら分が0でも「1時間0分」）、時刻は「23:14」「0:05」（24時間表記、時は0埋めなし、分は2桁。端末のタイムゾーン）、日付は「11月25日（火）」で表示する。今年（端末の現在日の年）以外の日付は「2025年11月25日（火）」と年を付ける（履歴が1年を超えても見分けられるようにする）
+- 時間は「7時間32分」「45分」「0分」（1時間以上なら分が0でも「1時間0分」）、時刻は「23:14」「0:05」（24時間表記、時は0埋めなし、分は2桁。端末のタイムゾーン）、日付は「11月25日（水）」で表示する。今年（端末の現在日の年）以外の日付は「2025年11月25日（火）」と年を付ける（履歴が1年を超えても見分けられるようにする）
 - 一覧：帰属日の新しい順。睡眠がない日は行を出さない。各行に日付・合計睡眠時間・主睡眠の就寝〜起床・昼寝がある日は「昼寝 n件」
 - 詳細
   - 主睡眠：就寝〜起床、睡眠時間
-  - ステージ内訳（主睡眠だけ。昼寝は含めない）：深い・浅い・REM・覚醒・不明の順に、分（切り捨て）と割合。割合の分母はステージ区間の合計時間（iOS でまとめた空きの時間は含めない）。割合は小数点以下を四捨五入（.5 は切り上げ）するため、合計が100%にならないことがある。0分（1分未満）のステージは出さないが、分母には含める（そのぶん表示される割合の合計はさらに100%から離れることがあり、それでよい）。ステージなしの睡眠は「ステージ情報なし」と表示する
+  - ステージ内訳（主睡眠だけ。昼寝は含めない）：深い・浅い・REM・覚醒・不明の順に、分（切り捨て）と割合。割合の分母はステージ区間の合計時間（iOS でまとめた空きの時間は含めない）。割合は小数点以下を四捨五入（.5 は切り上げ）するため、合計が100%にならないことがある。0分（1分未満）のステージは出さないが、分母には含める（そのぶん表示される割合の合計はさらに100%から離れることがあり、それでよい）。ステージなしの睡眠は「ステージ情報なし」と表示する。ステージありでも、表示する行（1分以上のステージ）が1つもないとき（例：`light` 59秒＋`deep` 59秒）も「ステージ情報なし」と表示する
   - 昼寝：就寝の早い順に、就寝〜起床と睡眠時間
 - 詳細画面の日付パラメータ
   - `YYYY-MM-DD` 形式で、実在する日付（例：`2026-02-30`・うるう年でない年の `02-29` は不可）でなければ「日付が正しくありません」
@@ -268,6 +269,7 @@
 | `sleepRecord.loadDetail` | error | 詳細の読み取りの失敗 | `requestId`・`err`（日付は出さない） |
 | `app.migrate` | error | マイグレーションの失敗 | `err` |
 
+- 取り込み範囲の日数は、`(now − 取り込み範囲の開始) ÷ 24時間` を小数第1位で四捨五入した数値（例：7日と5時間 → `7.2`、90日 → `90`）
 - 睡眠データそのもの（時刻・ステージ・帰属日）はログに出さない。件数と日数だけ
 - エラーは記録したあと呼び出し元へ投げ直す。受け口層（store・フック。3.1 の「例外の扱い」）が受け取って画面の状態にする
 
@@ -332,7 +334,7 @@
 - U5 表示の整形（`sleep-record-format.service.ts`）
   - U5-1 分を「7時間32分」「1時間0分」「45分」「0分」に整形する。59分 →「59分」、60分 →「1時間0分」（切り替わりの両側）
   - U5-2 時刻を「23:14」「0:05」に整形する（TZ 固定の環境で、UNIX ミリ秒から）
-  - U5-3 日付を「11月25日（火）」に整形する。今年以外は「2025年11月25日（火）」（現在日は引数で渡す。12月31日と翌年1月1日の境界を含む）
+  - U5-3 日付を「11月25日（水）」に整形する。今年以外は「2025年11月25日（火）」（現在日は引数で渡す。12月31日と翌年1月1日の境界を含む）
 - U6 共通ログ（`src/lib/logger.ts`）
   - U6-1 `name` と渡した値を1行の JSON で、レベルに対応する `console` の関数（info→`console.info`、warn→`console.warn`、error→`console.error`）に出す
   - U6-2 `err` に Error を渡すと、種別・メッセージ・スタックに整形される。Error 以外（文字列など）を渡してもメッセージとして出る
@@ -375,7 +377,7 @@
   - I3-5 （iOS の `requestAuthorization`・Android の `requestPermission` のそれぞれで）許可の要求が例外を投げると、エラーが呼び出し元に届き、`sleepRecord.requestAccess` の error ログが出る。例外なく終われば（iOS で false が返っても）成功として info ログが出る。要求に渡る引数が睡眠の読み取りだけ（iOS：`toRead` が睡眠のみで `toShare` なし、Android：`accessType: 'read'`・`recordType: 'SleepSession'` の1件のみ）
   - I3-6 「設定を開く」で Android の `openHealthConnectSettings` が呼ばれる。例外を投げると、エラーが呼び出し元に届き、`sleepRecord.openSettings` の error ログが出る。iOS で呼ぶと例外になる
 - I4 画面・フック（React Native Testing Library。ネイティブライブラリは差し替え、DB は本物）
-  - I4-1 一覧に日ごとの行が新しい順に出て、タップするとその日の詳細へ移る。各行の日付・合計睡眠時間・就寝〜起床が、テストで入れたデータから期待される文字列（例：「11月25日（火）」「7時間32分」「23:14〜6:46」）と一致する。昼寝がある日だけ「昼寝 n件」が出て、ない日は出ない
+  - I4-1 一覧に日ごとの行が新しい順に出て、タップするとその日の詳細へ移る。各行の日付・合計睡眠時間・就寝〜起床が、テストで入れたデータから期待される文字列（例：「11月25日（水）」「7時間32分」「23:14〜6:46」）と一致する。昼寝がある日だけ「昼寝 n件」が出て、ない日は出ない
   - I4-2 連携状態ごとに案内が出て、「連携する」を押すと許可の要求が呼ばれ、許可されたら同期して一覧が出る
   - I4-2b Android で許可しなかったら `notGranted` の案内のままで同期しない。「設定を開く」を押すと `openHealthConnectSettings` が呼ばれる。それが例外を投げると「ヘルスコネクトの設定を開けませんでした。…」が出て、もう一度押すと表示が消える
   - I4-3 許可の要求が失敗すると「連携の要求に失敗しました」が出て、ボタンは押せるまま。連携状態は取得し直されない（連携状態の取得関数が呼ばれない）。もう一度押すと表示が消えて要求し直す。要求中はボタンを押せない
@@ -396,7 +398,7 @@
   - I4-12 （フック単体・store 単体）連携状態が `ready` 以外（`notRequested`・`notGranted`・`unavailable`・`updateRequired`・`checkFailed`）なら、起動・前面復帰・`sync` の呼び出しのどれでも同期サービスが呼ばれない
   - I4-12b （store 単体）連携状態の取得でエラーが届くと、連携状態が `checkFailed` になる
   - I4-13 連携状態が `ready` 以外でも DB に睡眠があれば、案内と一緒に一覧が出て、詳細も開ける
-  - I4-13b （store 単体）1回の `sync()` で出る `sleepRecord.checkAccess`（失敗時）と `sleepRecord.sync` のログが、同じ `requestId` を持つ
+  - I4-13b （store 単体）1回の `sync()` の中で、連携状態の窓口と同期サービスに渡る `requestId` が同じ値で、別の `sync()` とは違う値になる。同期の中で出るログ（`sleepRecord.fetchFromHealth`・`sleepRecord.sync`）も同じ値を持つ
   - I4-14 詳細の URL を直接開いて起動しても、起動時の同期が1回走る
   - I4-15 詳細を表示している間に同期が終わると、詳細が読み直されて新しい内容になる
   - I4-17 DB に睡眠がある状態で同期中は、一覧を表示したまま上部に同期中の表示が出る
@@ -462,9 +464,335 @@
 ## テストリスト
 <!-- tdd スキル手順1で記入する。1項目に「種別（単体/中間/E2E）・前提・操作・期待結果・対応する新規テストケース」 -->
 
+- 並びは「6. 実装順」の手順どおり（tdd はこの順に上から1件ずつ Red → Green にする）。項目の ID は `T` ＋ 3桁の通し番号、「対応」は 5 の新規テストケースの番号
+- 共通の前提
+  - TZ は `Asia/Tokyo`（`globalSetup` で固定）。時刻はテスト内で `new Date('2026-11-25T06:30:00+09:00').getTime()` のように絶対時刻で書き、現在時刻は引数で渡す（I4 は `jest.setSystemTime('2026-11-25T12:00:00+09:00')`）
+  - 中間テストの DB は、better-sqlite3 の一時ファイルに `drizzle/` の実際のマイグレーションを適用し `PRAGMA foreign_keys = ON` を実行したもの（`tests/integration/helpers/`）。各テストの `beforeEach` で新しく作り、`afterEach` で閉じて消す
+  - 差し替えるのは 3.3 に挙げた外部I/Oの境界だけ（ネイティブライブラリ・`@/lib/db`・`Platform.OS`・`AppState`・I4-11 の `@/drizzle/migrations`）
+  - ログは `console.info`／`warn`／`error` を `jest.spyOn` で受け、出力の JSON を `JSON.parse` して検証する
+- 画面・フック・store（手順13〜15）では、特に書かない限り、起動時などの同期でネイティブの読み取りモックは DB のシードと同じ睡眠になるサンプルを返す（入れ替え後も同じ `id`・同じ表示になり、シードの行が消えない）
+- 「同期中の表示」は文言が 3.1 にないため、案内の判定（U4）では案内の種類（例：`{ kind: 'syncing' }`）を、画面では `testID`（`sleep-record-syncing`）で確かめる
+- `requestAccess()` と、そのあとに始める `sync()` は別の操作として、それぞれ `requestId` を作る（3.1 の「新しい `sync()` を始める」に従う）
+- T180〜 は test レビューで追加した項目で、手順の節の中に置いたが番号は末尾から振った
+- 「期待結果」は値まで書く。「〜になる」とあるものは、その値と一致することを `toEqual`／`toBe` で確かめる
+
+### 手順2 共通ログ（単体）：`tests/unit/lib/logger.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T001 | console をスパイ | `logger.info('a.b', { requestId: 'r1', count: 3 })` | `console.info` が1回、引数は1つの文字列で改行なし、`JSON.parse` すると `{ name: 'a.b', requestId: 'r1', count: 3 }` を含む。`console.warn`・`console.error` は呼ばれない | U6-1 |
+| T002 | 同上 | `logger.warn('a.b', {})`・`logger.error('a.b', {})` をそれぞれ呼ぶ | warn は `console.warn` だけ、error は `console.error` だけに1回出る。`name` は `'a.b'` | U6-1 |
+| T003 | `new TypeError('boom')` | `logger.error('a.b', { err })` | `err` が `{ type: 'TypeError', message: 'boom', stack: <err.stack と同じ文字列> }` | U6-2 |
+| T004 | — | `logger.error('a.b', { err: 'just text' })` | `err.message` が `'just text'` | U6-2 |
+| T005 | 睡眠らしい値 `{ startAt: 1764000000000, stage: 'deep' }` と配列 `[1, 2]` | `logger.info('a.b', { data: obj, list: arr })` | `data` と `list` が `"[omitted]"`。出力の文字列に `1764000000000`・`deep` が含まれない | U6-3 |
+| T006 | — | `logger.info('a.b', { a: null, b: undefined, c: true, d: 'x' })` | `a` は `null`、`b` のキーがない、`c` は `true`、`d` は `'x'` | U6-4 |
+| T007 | `stack` を `undefined` にした Error | `logger.error('a.b', { err })` | `err` に `type`・`message` はあり、`stack` のキーがない | U6-4 |
+
+### 手順4 テーブル定義と制約（中間）：`tests/integration/features/sleep-record/sleep-record.schema.test.ts`
+
+テーブルがない状態で失敗することを先に確かめる（4. の手順）。各行は、ほかの列を正しい値にしたうえで1か所だけを崩して `INSERT` する。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T008 | 正しい睡眠1件とそのステージ2件 | 正しい値で挿入する（対照） | 例外なく入り、件数が睡眠1・ステージ2 | I1-5 |
+| T009 | 同上 | 睡眠を `DELETE` する | その睡眠のステージが0件になる（CASCADE。PRAGMA が効いている） | I1-4 |
+| T010 | — | `sleep_sessions` に `end_at = start_at`、`end_at < start_at` をそれぞれ挿入 | どちらも制約違反で失敗し、行が増えない | I1-5 |
+| T011 | — | `sleep_sessions` に `asleep_minutes = 0`、`has_stages = 2`、`wake_date = '2026/11/25'` をそれぞれ挿入 | それぞれ制約違反で失敗する。`asleep_minutes = 1`・`has_stages = 0`／`1`・`wake_date = '2026-11-25'` は入る（境界の反対側） | I1-5 |
+| T012 | — | `sleep_sessions` の `id`・`source_id`・`start_at`・`end_at`・`wake_date`・`asleep_minutes`・`has_stages` を1列ずつ NULL にして挿入 | 7件とも失敗する（`id` は text の主キーで、SQLite は NOT NULL がないと NULL を受け入れるため、生成されたマイグレーションに `PRIMARY KEY NOT NULL` が入っていることもあわせて確かめる） | I1-5 |
+| T013 | 睡眠1件 | `sleep_stages` に `stage = 'inBed'`、`end_at = start_at`、`end_at < start_at`、存在しない `session_id`、`session_id`・`stage`・`start_at`・`end_at` の NULL をそれぞれ挿入 | すべて失敗する。`stage` が5種（`awake`・`light`・`deep`・`rem`・`unspecified`）のときは入る | I1-5 |
+| T014 | — | `sleep_sync_state` に `id = 2`、`last_synced_at = NULL` をそれぞれ挿入 | どちらも失敗する。`id = 1` は入り、2行目の `id = 1` は PK で失敗する | I1-5 |
+
+### 手順5 睡眠の組み立て（単体）：`tests/unit/features/sleep-record/sleep-record-session.service.test.ts`
+
+重なり排除の項目（T034〜T045）は、特に書かない限り Android の別々の SleepSession で作る（iOS で同じ記録元だと手順2で1つにまとまり、前提を作れないため）。代わりの ID・記録元（T047・T048・T181）は、ID・記録元が欠けたままのセグメントを受け取った組み立てサービスが付ける（U1-15 の置き場所に合わせる）。セグメントは `{ id, sourceId, stage, startAt, endAt }`（Android は所属する SleepSession の ID・`startTime`/`endTime` つき）で直接作って渡す。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T015 | — | 空の配列を組み立てる | 睡眠0件 | U1-13 |
+| T016 | iOS・同じ記録元。`light` 23:00–23:30 と 23:30–23:30（長さ0）と 2:00–1:00（前後が逆）と `deep` 23:30–1:00 | 組み立てる | 睡眠1件、就寝 23:00・起床 1:00、ステージ区間は `light` 23:00–23:30・`deep` 23:30–1:00 の2件（長さ0・逆のものは入らない） | U1-0 |
+| T017 | iOS・同じ記録元。A 23:00–1:00、B 1:30–6:00（空きちょうど30分） | 組み立てる | 睡眠1件、就寝 23:00・起床 6:00 | U1-1 |
+| T018 | iOS・同じ記録元。A 23:00–1:00、B 1:30:00.001–6:00（空き30分1ミリ秒） | 組み立てる | 睡眠2件（23:00–1:00 と 1:30:00.001–6:00） | U1-1 |
+| T019 | iOS・同じ記録元。A 23:00–3:00、B 1:00–6:00（重なる）／A 23:00–6:00、B 1:00–2:00（含まれる） | それぞれ組み立てる | どちらも睡眠1件。前者は就寝 23:00・起床 6:00、後者は就寝 23:00・起床 6:00（B の終了 2:00 ではない） | U1-2 |
+| T020 | iOS・同じ記録元。A 23:00–3:00、C 1:00–1:30（A に含まれる）、B 3:20–6:00。直前の C の終了からは空き1時間50分だが、それまでの最も遅い終了（A の 3:00）からは20分 | 組み立てる | 睡眠1件、就寝 23:00・起床 6:00（直前のセグメントの終了で測ると2件に割れる誤りを検出する） | U1-1・U1-2 |
+| T021 | iOS・記録元 `a` の 23:00–1:00 と記録元 `b` の 1:10–6:00（空き10分） | 組み立てる | 重なりがないので睡眠2件、記録元はそれぞれ `a`・`b` | U1-2b |
+| T022 | T017 と同じセグメントを、配列の順を逆・ばらばらにして渡す | 組み立てる | T017 と同じ結果（睡眠1件、就寝 23:00・起床 6:00、同じステージ区間）。未整列の入力でも開始時刻順に並べてから判定する | U1-1（未整列） |
+| T023 | Android・同じ SleepSession（`startTime` 22:00・`endTime` 7:00）に `light` 23:00–1:00 と `deep` 3:00–6:00（空き2時間） | 組み立てる | 睡眠1件、就寝 23:00・起床 6:00（`startTime`/`endTime` ではない）。区間は2件、睡眠時間 300分 | U1-3 |
+| T024 | Android・SleepSession 23:00–6:00 のステージが `light` 1:00–1:00 と `deep` 2:00–1:00 だけ | 組み立てる | 睡眠1件、就寝 23:00・起床 6:00、区間は `unspecified` 23:00–6:00 の1件、ステージなし | U1-3b |
+| T190 | Android・SleepSession 23:00–6:00 のステージが `light` 23:00–1:00 と `deep` 2:00–2:00（長さ0） | 組み立てる | 区間は `light` 23:00–1:00 の1件だけで、セッション全体の `unspecified` にはしない。就寝 23:00・起床 1:00、ステージあり | U1-3b |
+| T025 | Android・ステージなしで SleepSession 自体が 6:00–6:00、もう1件が 6:00–5:00 | 組み立てる | 睡眠0件 | U1-3b |
+| T026 | 1つの睡眠（覚醒以外の区間はどれも1時間）に：`awake` 1時間＋`unspecified` 1時間／`unspecified` 1時間＋`rem` 1時間／`light` 1時間だけ／`deep` 1時間だけ | それぞれ組み立てる | 1つ目は `hasStages: false`、残り3つは `hasStages: true`（どれも睡眠1件で残る） | U1-3c |
+| T027 | 同じ睡眠で `unspecified` 0:00–2:00 と `deep` 1:00–3:00 | 組み立てる | 区間 `unspecified` 0:00–1:00・`deep` 1:00–3:00、睡眠時間 180分（240分ではない） | U1-4 |
+| T028 | 同じ睡眠で `deep` 0:00–2:00 と `rem` 1:00–3:00／`rem` 0:00–2:00 と `light` 1:00–3:00 | それぞれ組み立てる | 前者は `deep` 0:00–2:00・`rem` 2:00–3:00、後者は `rem` 0:00–2:00・`light` 2:00–3:00。どちらも睡眠時間 180分 | U1-4 |
+| T029 | 同じ睡眠で `light` 0:00–2:00 と `awake` 1:00–3:00／`unspecified` 0:00–2:00 と `awake` 1:00–3:00 | それぞれ組み立てる | 前者は `light` 0:00–2:00・`awake` 2:00–3:00 で睡眠時間 120分。後者は `unspecified` 0:00–1:00・`awake` 1:00–3:00 で睡眠時間 60分（`awake` が `unspecified` より優先） | U1-4b |
+| T030 | 同じ睡眠で `deep` 0:00–3:00 と、それに完全に含まれる `unspecified` 1:00–2:00 | 組み立てる | 区間は `deep` 0:00–3:00 の1件だけ（長さ0の区間がない） | U1-4c |
+| T031 | 同じ睡眠で `light` 0:00–1:00 と `light` 1:00–2:00（隣接）、および `light` 0:00–1:00・`deep` 0:30–0:40・`light` 0:40–2:00 | それぞれ組み立てる | 前者は `light` 0:00–2:00 の1件。後者は `light` 0:00–0:30・`deep` 0:30–0:40・`light` 0:40–2:00 の3件（同じステージでも隣接しないものはつながない） | U1-4c |
+| T032 | `light` が 7時間32分59秒、`awake` が 30分 | 組み立てる | 睡眠時間 452分 | U1-5 |
+| T193 | 1つの睡眠に `awake` 23:00–23:20、`light` 23:20–6:00、`awake` 6:00–6:10 | 組み立てる | 就寝 23:00・起床 6:10（覚醒のセグメントも範囲に入る）、睡眠時間 400分 | U1-5 |
+| T033 | `awake` だけの睡眠／`light` 59秒＋`awake` 1時間／`light` ちょうど60秒＋`awake` 1時間 | それぞれ組み立てる | 1つ目・2つ目は睡眠0件。3つ目は睡眠1件で睡眠時間 1分 | U1-6 |
+| T034 | 記録元 `a` のステージなし 6時間と、重なる記録元 `b` のステージあり 5時間 | 組み立てる | `b` の睡眠だけ残る（短くてもステージありが先） | U1-7 |
+| T035 | 重なる2件、両方ステージあり。X は 301分・記録元 `com.b`・就寝 23:10・`id = 'b'`、Y は 300分・記録元 `com.a`・就寝 23:00・`id = 'a'`（下位の基準はすべて Y が勝つ向き） | 組み立てる | X だけ残る（睡眠時間が記録元・就寝・`id` より先） | U1-8 |
+| T036 | 重なる2件、両方ステージなし。T035 と同じ置き方（301分の側が下位の基準ではすべて負ける） | 組み立てる | 301分のほうだけ残る | U1-8 |
+| T037 | 重なる2件、両方ステージあり・同じ睡眠時間。X は記録元 `com.a`・就寝 23:10・`id = 'b'`、Y は `com.b`・就寝 23:00・`id = 'a'` | 組み立てる | X（`com.a`）だけ残る（記録元が就寝・`id` より先） | U1-8 |
+| T038 | 重なる2件、ステージあり・睡眠時間・記録元が同じ。X は就寝 23:00・`id = 'b'`、Y は就寝 23:10・`id = 'a'` | 組み立てる | X（就寝 23:00）だけ残る（就寝が `id` より先） | U1-8 |
+| T039 | 重なる2件、ステージあり・睡眠時間・記録元・就寝が同じで、`id` が `b` と `a` | 組み立てる | `id = 'a'` だけ残る | U1-8 |
+| T040 | Android・同じ記録元 `com.soxai` で重なる SleepSession 2件、両方ステージあり。`hc-1` は 300分・就寝 23:00、`hc-2` は 301分・就寝 23:10 | 組み立てる | `id = 'hc-2'` の1件だけ残る（睡眠時間が就寝・`id` より先） | U1-9 |
+| T189 | Android・同じ記録元 `com.soxai` の別々の SleepSession 2件、23:00–1:00 と 1:10–6:00（重ならず、空き10分） | 組み立てる | 睡眠2件のまま（30分以内をまとめるのは iOS だけ） | U1-3 |
+| T041 | Android の別々の SleepSession（記録元は別）。A 22:00–1:00、B 0:30–3:30、C 3:00–6:00（各180分。A–B・B–C が重なり A–C は重ならない）。ステージありは B だけ | 組み立てる | B だけ残る（B が最優先で、A・C は B と重なる） | U1-10 |
+| T042 | 同じく A 22:00–1:00（180分）、B 0:30–3:20（170分）、C 3:00–5:59（179分）。3件ともステージあり | 組み立てる | A と C が残る（順位は A・C・B。B は A と重なるので落ち、C は A と重ならない） | U1-10 |
+| T195 | 同じく A 22:00–1:00（180分）、B 0:30–3:29（179分）、C 3:00–5:50（170分）。3件ともステージあり（順位は A・B・C） | 組み立てる | A と C が残る（先頭から順に「残した睡眠と重ならなければ残す」。B は A と重なるので落ち、C は落ちた B とは比べない。「自分より上位と重なれば落とす」方式だと A だけになり、見分けられる） | U1-10 |
+| T043 | T041 の3件を配列の順を入れ替えて渡す | 組み立てる | T041 と同じく B だけ残る（入力順に左右されない） | U1-10（未整列） |
+| T044 | Android の別々の SleepSession、記録元が違う A 23:00–3:00 と B 3:00–6:00（終了と開始が同時刻） | 組み立てる | 2件とも残る（重なりとみなさない） | U1-11 |
+| T045 | 記録元が違う睡眠 A 23:00–3:00:00.001（ステージあり・240分）と B 3:00–6:00（ステージあり・180分）。1ミリ秒重なる | 組み立てる | A だけ残る | U1-11 |
+| T046 | `2026-11-24T23:30+09:00` 就寝・`2026-11-25T06:30+09:00` 起床／起床 `2026-11-24T23:59:59.999+09:00`／起床 `2026-11-25T00:00:00.000+09:00` | それぞれ組み立てる | 帰属日は順に `2026-11-25`・`2026-11-24`・`2026-11-25` | U1-12 |
+| T047 | iOS で記録元が `undefined`／空文字、UUID が `undefined`／空文字のサンプル（開始 S・終了 E。4通りの組み合わせを `it.each`） | 組み立てる | 記録元が欠けたら `sourceId` は `unknown`、UUID が欠けたら `id` は `<sourceId>:<S>:<E>`（両方欠けたら `unknown:<S>:<E>`）。同じ入力でもう1回組み立てても同じ `id` | U1-15 |
+| T181 | iOS・記録元 `com.soxai` で、UUID が空文字の先頭サンプル（S1–E1）と UUID `u9` の後続サンプル（S2–E2）が1つの睡眠になる | 組み立てる | 睡眠の `id` は `com.soxai:<S1>:<E1>`（代わりの ID はセグメントごとに、そのセグメントの時刻で付ける。睡眠全体の時刻 S1–E2 ではない） | U1-15・U1-14 |
+| T048 | Android で `metadata.id`・`dataOrigin` が `undefined`／空文字の SleepSession | 組み立てる | `sourceId` は `unknown`、`id` は `unknown:<startTime>:<endTime>`。記録元だけあれば `<記録元>:<startTime>:<endTime>`。`metadata.id = 'hc-1'` で `dataOrigin` だけ `undefined` なら `id` は `hc-1`、`sourceId` は `unknown` | U1-15 |
+| T049 | iOS・同じ記録元 `com.soxai` の3サンプル（UUID `u2` 23:00 開始、`u1` 23:00 開始、`u0` 1:00 開始） | 組み立てる | 睡眠の `id` は `u1`（開始が最も早い中で辞書順で先）、`sourceId` は `com.soxai` | U1-14 |
+| T050 | Android・`metadata.id = 'hc-1'`・`dataOrigin = 'com.soxai'` | 組み立てる | `id` は `hc-1`、`sourceId` は `com.soxai` | U1-14 |
+
+### 手順6 日ごとの要約と詳細（単体）：`tests/unit/features/sleep-record/sleep-record-day.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T051 | 帰属日 `2026-11-25` に、就寝 `15:00` の 30分、就寝 `2026-11-24T23:00` の 420分、就寝 `12:00` の 60分を、この順で渡す | 1日の詳細を作る | 主睡眠は 420分、昼寝は 12:00 の 60分・15:00 の 30分の順 | U2-1 |
+| T052 | 帰属日 `2026-11-25` に 300分の睡眠2件（就寝 `2026-11-25T13:00` のものを先、`2026-11-24T22:00` のものを後に渡す） | 1日の詳細を作る | 主睡眠は就寝 `2026-11-24T22:00` のもの、昼寝は `2026-11-25T13:00` のもの | U2-1 |
+| T053 | T051 のデータ | 日ごとの要約一覧を作る | `2026-11-25` の合計睡眠時間 510分、昼寝の件数 2、主睡眠の就寝・起床が 420分の睡眠のもの | U2-2 |
+| T054 | 帰属日 `2026-11-23`・`2026-11-25`・`2026-11-24` の睡眠を、この順（未整列）で渡す | 日ごとの要約一覧を作る | `2026-11-25`・`2026-11-24`・`2026-11-23` の順の3行。睡眠のない `2026-11-22` などの行はない | U2-3（未整列） |
+| T055 | 睡眠0件 | 日ごとの要約一覧を作る | 空の配列 | U2-3 |
+| T056 | 主睡眠の区間：`deep` 90分・`light` 200分・`rem` 80分・`awake` 20分・`unspecified` 10分。昼寝に `deep` 30分 | 1日の詳細を作る | 内訳は深い 90分 23%・浅い 200分 50%・REM 80分 20%・覚醒 20分 5%・不明 10分 3% の順（分母 400分）。昼寝の `deep` は含まれない | U2-4 |
+| T057 | 主睡眠の区間：`light` 238分、`rem` 59秒、`awake` ちょうど60秒（合計 239分59秒） | 1日の詳細を作る | 行は浅い 238分 99%・覚醒 1分 0% の2行で、REM の行はない。分母は 239分59秒（REM の59秒を含む。含めないと浅いは 100% になる） | U2-4 |
+| T058 | iOS でまとめた主睡眠：区間の合計6時間（`light` 6時間）、区間のない空き20分 | 1日の詳細を作る | 浅い 360分・100%（分母は 360分で、空き20分は入らない） | U2-4b |
+| T059 | 分母 400分に対し 50分（12.5%）と 49.6分（12.4%）のステージ | 1日の詳細を作る | 前者 13%、後者 12% | U2-5 |
+| T060 | ステージなしの主睡眠 | 1日の詳細を作る | 内訳が `null`（ステージありで出す行がないときの空配列 `[]` と区別する） | U2-6 |
+| T191 | ステージありの主睡眠で、区間が `light` 59秒・`deep` 59秒だけ（睡眠時間 1分） | 1日の詳細を作る | 内訳が空配列 `[]`（ステージなしの `null` とは別の値） | U2-4 |
+| T061 | `2026-11-24` にだけ睡眠 | `2026-11-25` の詳細を作る | 「データなし」の結果 | U2-7 |
+
+### 手順6 日付の検証（単体）：`tests/unit/features/sleep-record/sleep-record-date.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T062 | — | `2026-11-25`・`2028-02-29`・`2000-02-29`・`2026-11-30`・`2026-12-31`・`2026-01-01`・`2026-02-28` を検証（`it.each`） | 7件とも正しく、同じ文字列の帰属日が返る（T063 の不正な側と対になる境界） | U2-8 |
+| T063 | — | `2026-02-29`・`2100-02-29`・`2026-02-30`・`2026-11-31`・`2026-12-32`・`2026-00-10`・`2026-13-01`・`2026-11-00` を検証（`it.each`） | すべて不正（実在しない日付） | U2-8 |
+| T064 | — | `abc`・`2026-1-5`・`2026-11-250`・`2026-11-25T00:00`・空文字を検証（`it.each`） | すべて不正（形式違い） | U2-8 |
+| T065 | — | `undefined`・`['2026-11-25']` を検証 | どちらも不正 | U2-8 |
+
+### 手順6 表示の整形（単体）：`tests/unit/features/sleep-record/sleep-record-format.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T066 | — | 分 452・60・59・45・0 を整形 | 「7時間32分」「1時間0分」「59分」「45分」「0分」 | U5-1 |
+| T067 | TZ `Asia/Tokyo` | `2026-11-24T23:14+09:00`・`2026-11-25T00:05+09:00`・`2026-11-25T09:00+09:00` の UNIX ミリ秒を整形 | 「23:14」「0:05」「9:00」 | U5-2 |
+| T068 | 現在日 `2026-11-25` | 帰属日 `2026-11-25`・`2025-11-25` を整形 | 「11月25日（水）」「2025年11月25日（火）」 | U5-3 |
+| T069 | 現在日 `2026-12-31`／`2027-01-01` | 帰属日 `2026-12-31` と `2027-01-01` をそれぞれの現在日で整形 | 現在日 `2026-12-31` では「12月31日（木）」「2027年1月1日（金）」、現在日 `2027-01-01` では「2026年12月31日（木）」「1月1日（金）」 | U5-3 |
+
+### 手順7 DB リポジトリ（中間）：`tests/integration/features/sleep-record/sleep-record.repository.test.ts`
+
+範囲の開始を `R = 2026-11-18T12:00+09:00` とする。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T070 | DB に起床 `R − 1ms`・`R`・`R + 1日` の睡眠（重ならない）と、同期記録 `last_synced_at = R − 3日` | 範囲の開始 `R`・同期開始時刻 `T` で、新しい睡眠1件（`R + 2日` 起床）を入れ替える | 起床 `R − 1ms` の睡眠は残り、`R`・`R + 1日` は消え、新しい1件が入る。同期記録は1行のままで `last_synced_at = T`（上書き） | I1-1 |
+| T071 | DB に起床 `R − 3日`・`id = 'x'` の睡眠 | 同じ `id = 'x'` で起床 `R + 1日` の睡眠を入れ替える | 例外なく、`id = 'x'` は新しい値の1件だけ | I1-2 |
+| T072 | DB に範囲より前の睡眠 P1（採用する睡眠と1ミリ秒重なる）と P2（終了が採用する睡眠の開始とちょうど同じ） | 入れ替える | P1 は消え、P2 は残る | I1-3 |
+| T183 | DB に範囲より前の睡眠 P1（ステージあり・480分）。採用する睡眠はステージなし・300分で、P1 と時間が重なる | 入れ替える | P1 は消え、採用する睡眠が入る（組み立ての順位づけを使わず、今回読んだ睡眠を残す） | I1-3 |
+| T073 | DB に起床 `R + 1日` の睡眠とステージ3件 | 入れ替える | 消えた睡眠のステージ区間が0件（ほかの睡眠のステージは残る） | I1-4 |
+| T074 | DB に睡眠・ステージ・同期記録。テスト用DBに `sleep_stages` への挿入を `RAISE(ABORT)` するトリガー | 入れ替える | 例外が投げられ、睡眠・ステージ区間・同期記録の全行が入れ替え前と一致する | I1-6 |
+| T075 | 帰属日 `2026-11-24` に睡眠 `s24`、`2026-11-25` に `s25a`・`s25b`（ステージ区間つき） | 日ごとの取得・`2026-11-25` の取得・有無を呼ぶ | 日ごとは `s24`・`s25a`・`s25b` の3件（`id` の集合が一致）、指定日は `s25a`・`s25b` とそのステージ区間だけ、有無は「あり」 | I1-7 |
+| T076 | DB が空 | 同上 | 日ごとは空、指定日は空、有無は「なし」。同期記録の読み取りは「なし」 | I1-7 |
+
+### 手順8 ヘルスケアのリポジトリ（中間）：`tests/integration/features/sleep-record/sleep-record-health.repository.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T077 | HealthKit のモックが `awake`・`asleepCore`・`asleepDeep`・`asleepREM`・`asleepUnspecified`・`inBed`・表にない値 `99` を1件ずつ返す | iOS でセグメントを読む | 順に `awake`・`light`・`deep`・`rem`・`unspecified` に変わり、`inBed` はなく、`99` は `unspecified`。未知の値の件数 1 | I3-1 |
+| T078 | 同上 | iOS でセグメントを読む（期間 S〜E） | `queryCategorySamples` に `HKCategoryTypeIdentifierSleepAnalysis`、`limit: 0`、`filter.date` の `startDate: S`・`endDate: E` が渡る | I3-1 |
+| T079 | `isHealthDataAvailable` が false | iOS の連携状態を取る | `unavailable` | I3-1b |
+| T080 | `getRequestStatusForAuthorization` が `shouldRequest`／`unnecessary`／`unknown`（`it.each`） | iOS の連携状態を取る | 順に `notRequested`・`ready`・`ready`。渡る引数は `toRead` が睡眠だけで `toShare` は空／なし（T125 と同じ） | I3-1b |
+| T081 | ヘルスコネクトのモックが `AWAKE`・`OUT_OF_BED`・`LIGHT`・`DEEP`・`REM`・`SLEEPING`・`UNKNOWN`・表にない値を持つ SleepSession（`metadata.id = 'hc-1'`・`dataOrigin = 'com.soxai'`、先頭のステージは `startTime: '2026-11-24T14:00:00.000Z'`・`endTime: '2026-11-24T15:00:00.000Z'`）と、ステージなしの SleepSession を返す | Android でセグメントを読む | 順に `awake`・`awake`・`light`・`deep`・`rem`・`unspecified`・`unspecified`・`unspecified`。先頭のセグメントは開始 `1795528800000`（JST 23:00）・終了 `1795532400000`、セッション ID `hc-1`・記録元 `com.soxai`。ステージなしはセッション全体の `unspecified` 1件。未知の値の件数 1 | I3-2 |
+| T082 | `readRecords` が1ページ目で `pageToken: 'p2'`、2ページ目で `pageToken: undefined` を返す／1ページ目で `pageToken: ''` を返す | Android で読む（期間 S〜E） | 前者は2回呼ばれ、2回目に `pageToken: 'p2'` が渡り、両ページ分が返る。後者は1回で打ち切る。どちらも `timeRangeFilter` が `{ operator: 'between', startTime: S, endTime: E }` | I3-2 |
+| T083 | `getSdkStatus` が `SDK_UNAVAILABLE`／`SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED`（`it.each`） | Android の連携状態を取る | 順に `unavailable`・`updateRequired` | I3-2b |
+| T084 | `SDK_AVAILABLE`・`initialize` true。`getGrantedPermissions` が `[{ accessType: 'read', recordType: 'SleepSession' }]`／`[{ accessType: 'write', recordType: 'SleepSession' }]`／`[{ accessType: 'read', recordType: 'HeartRate' }]`／`[]`（`it.each`） | Android の連携状態を取る | 1つ目だけ `ready`、残り3つは `notGranted` | I3-2b |
+| T085 | `getSdkStatus` が表にない値 `99` | Android の連携状態を取る | 例外が投げられる | I3-2b |
+| T086 | 両方のモックを用意 | `os: 'ios'`・`os: 'android'` で読み取りを呼ぶ | `ios` では `queryCategorySamples` だけ、`android` では `readRecords` だけが呼ばれる | I3-3 |
+
+### 手順9 取り込み範囲（単体）：`tests/unit/features/sleep-record/sleep-record-sync-range.service.test.ts`
+
+`now = 2026-11-25T12:00+09:00`、`D = 24時間` とする。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T087 | 同期記録なし | 範囲を計算 | 開始 `now − 90D`、終了 `now` | U3-1 |
+| T088 | 前回 `now − 3D` | 範囲を計算 | 開始 `now − 7D` | U3-2 |
+| T089 | 前回 `now − 7D`／`now − 7D − 1ms` | 範囲を計算 | 前者は `now − 7D`、後者は `now − 7D − 1ms` | U3-3 |
+| T090 | 前回 `now − 20D` | 範囲を計算 | 開始 `now − 20D` | U3-4 |
+| T091 | 前回 `now − 90D`／`now − 90D + 1ms`／`now − 90D − 1ms` | 範囲を計算 | 順に `now − 90D`・`now − 90D + 1ms`・`now − 90D` | U3-5 |
+| T092 | 前回 `now − 120D` | 範囲を計算 | 開始 `now − 90D` | U3-6 |
+| T093 | 前回 `now + 2D`（未来） | 範囲を計算 | 開始 `now − 7D` | U3-7 |
+| T094 | 前回 `now − 20D` | ヘルスケアの読み取り開始を計算 | `now − 21D`（範囲の開始 − 24時間） | U3-8 |
+| T095 | 範囲の開始 `R` | 起床 `R`・`R − 1ms` の睡眠を判定 | 前者は採用、後者は採用しない | U3-9 |
+
+### 手順9 同期（中間）：`tests/integration/features/sleep-record/sleep-record-sync.service.test.ts`
+
+`getNow` は1回の同期で開始・終了の2回呼ばれる。各同期の開始は項目に書いた時刻（書いていなければ `now`）、終了はその `+ 1234ms` を返す関数を渡す（2回同期する項目は、2回目の開始を項目に書く。T108 の2回目は `now + 1D`）。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T096 | DB 空・同期記録なし。HealthKit のモックが3件の睡眠になるサンプルを返す。そのうち1件は記録元 `com.soxai` の4サンプル：`u1` `asleepCore` `2026-11-24T23:00`–`2026-11-25T01:00`、`u2` `asleepDeep` 01:00–02:00、`u3` `awake` 02:00–02:10、`u4` `asleepREM` 02:10–06:30（`+09:00`） | `os: 'ios'` で同期 | `queryCategorySamples` の `startDate` が `now − 91D`、`endDate` が `now`。DB に睡眠3件、同期記録が `now`。4サンプルの睡眠は `id = 'u1'`・`source_id = 'com.soxai'`・`start_at = 1795528800000`・`end_at = 1795555800000`・`wake_date = '2026-11-25'`・`asleep_minutes = 440`・`has_stages = 1`、ステージ区間は `light` 23:00–01:00・`deep` 01:00–02:00・`awake` 02:00–02:10・`rem` 02:10–06:30 の4行 | I2-1・I2-3d |
+| T097 | このテストの中で1回目の同期（`now`）を行う。モックは起床 `now − 1D`（A）・`now − 2D`（B）・`now − 3D`（C）と `now − 10D`（D）の4件を返す。2回目の同期（`now + 1D`。範囲の開始は `now − 6D`）では、モックは A を返さず、B の起床を30分遅らせ、C はそのまま、D も返さない | `now + 1D` で2回目の同期 | DB の睡眠は B・C・D の計3件。A はなく、B はその `id` の行が1行だけで新しい起床時刻、D は範囲外なのでモックが返さなくても残る。同期記録は `now + 1D` | I2-2 |
+| T098 | 同期記録 `now − 20D` | 同期 | 読み取りの `startDate` が `now − 21D`、`endDate` が `now`（`min(前回, now − 7D) − 24時間`） | I2-3d |
+| T099 | DB に睡眠と同期記録。`queryCategorySamples` が reject する | 同期 | 呼び出し元に同じエラーが届く。DB の睡眠と同期記録は変わらない。`sleepRecord.sync` の error ログ（`requestId`・`err`） | I2-3 |
+| T100 | `os: 'android'`。DB に睡眠と同期記録。(a) `readRecords` の1ページ目は成功（`pageToken: 'p2'`）、2ページ目が reject、(b) 1ページ目が reject（2ケース） | 同期 | どちらも reject させたエラーと同じもの（`toBe`）が届き、DB の睡眠と同期記録は変わらず、`sleepRecord.sync` の error ログが出る | I2-3b |
+| T101 | `os: 'android'`。SleepSession 2件（重ならない）：`hc-1`（`dataOrigin = 'com.soxai'`、ステージ `LIGHT` `2026-11-24T14:00:00.000Z`–`2026-11-24T21:30:00.000Z`）と `hc-2` | 同期 | DB に睡眠2件。`hc-1` は `source_id = 'com.soxai'`・`start_at = 1795528800000`・`end_at = 1795555800000`・`wake_date = '2026-11-25'`・`asleep_minutes = 450` | I2-3c |
+| T102 | `os: 'android'`。`metadata.id`・`dataOrigin` のない、ステージなしの SleepSession（`startTime` S・`endTime` E） | 同期 | 成功し、`id = 'unknown:<S のUNIXミリ秒>:<E のUNIXミリ秒>'`・`source_id = 'unknown'` で保存される | I2-3e |
+| T103 | 同期記録なし。睡眠3件になるセグメント計12件 | 同期 | `sleepRecord.sync` の info ログが `{ requestId, rangeDays: 90, segmentCount: 12, savedCount: 3, replaced: true, ms: 1234 }`。ログの文字列に睡眠の時刻（UNIX ミリ秒・ISO 文字列）・ステージ名・帰属日が含まれない | I2-4・I2-7 |
+| T182 | 同期記録 `now − 7D − 5時間`（範囲の開始が前回の同期開始時刻になる） | 同期 | info ログの `rangeDays` が `7.2`。同期記録 `now − 7D − 3時間`（7.125日）なら `7.1`、`now − 7D − 1.2時間`（7.05日）なら `7.1`（.05 は切り上げ） | I2-4 |
+| T104 | DB に睡眠と同期記録。テスト用DBに `sleep_stages` への挿入を `RAISE(ABORT)` で失敗させるトリガーを、この項目の中で作る（DB のエラーメッセージにクエリの値が入りうる経路） | 同期 | error ログの文字列に、入力した睡眠の時刻（UNIX ミリ秒・ISO 文字列）・ステージ名・帰属日が含まれない（通らなければ作業を止め、ログの `err` の扱いを相談する） | I2-4 |
+| T105 | DB に睡眠と同期記録。モックが0件 | 同期 | 成功し、DB の睡眠と同期記録は変わらない。info ログに `replaced: false`・`segmentCount: 0`・`savedCount: 0`・`rangeDays`（前提の同期記録から計算した値）・`ms: 1234` | I2-5 |
+| T106 | DB に睡眠と同期記録。テスト用DBに `sleep_stages` 挿入を `RAISE(ABORT)` するトリガー | 同期 | DB が投げたエラーと同じもの（`toBe`）が届き、`sleepRecord.sync` の error ログ、DB の睡眠・ステージ・同期記録は変わらない | I2-6 |
+| T107 | 同期記録 `now − 3D`（範囲の開始 `R = now − 7D`）。iOS サンプルが `R − 2時間`〜`R` と `R`〜`R + 6時間` | 同期 | 睡眠1件で、就寝 `R − 2時間`・起床 `R + 6時間` | I2-8 |
+| T108 | 同期記録なし。モックが0件 | `now` と `now + 1D` で同期を2回 | 同期記録は書かれず、2回目の読み取り開始は `(now + 1D) − 91D`（初回扱いのまま） | I2-9 |
+| T109 | DB に範囲内の睡眠1件。範囲の開始より前に起床する睡眠になるセグメントだけ／`awake` だけのセグメントが返る（2ケース） | 同期 | どちらも範囲内の DB の睡眠が消え、同期記録が `now` になる。info ログに `replaced: true`・`savedCount: 0` | I2-11 |
+| T110 | DB に睡眠と同期記録。モックが `inBed` だけ／長さ0のサンプルだけを返す（2ケース） | 同期 | どちらも DB と同期記録は変わらない。info ログに `segmentCount: 0`・`savedCount: 0`・`replaced: false` | I2-12 |
+| T111 | モックが表にない値 `99` のサンプルを2件含む | 同期 | `sleepRecord.fetchFromHealth` の warn ログ `{ requestId, unknownCount: 2 }`。ログの文字列に `99` が含まれない | I2-10 |
+| T112 | 表にない値なし | 同期 | `sleepRecord.fetchFromHealth` のログが出ない | I2-10 |
+
+### 手順10 案内の判定（単体）：`tests/unit/features/sleep-record/sleep-record-guide.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T113 | 睡眠なし・同期中でない・同期失敗なし | 起きる組み合わせで判定（`it.each`）：iOS の `unavailable`・`notRequested`・`checkFailed`、Android の `unavailable`・`updateRequired`・`notGranted`・`checkFailed` | それぞれ 3.1 の表の案内1つだけ（文言の全文とボタンの種類が一致。`notGranted` は連携ボタンと設定を開くボタンの両方）。「睡眠データがありません」を含まない | U4-1 |
+| T114 | `ready`・睡眠あり（iOS・Android の両方） | 判定 | どちらも案内なし（空） | U4-2 |
+| T115 | `ready`・睡眠なし・同期中でない | iOS／Android で判定 | iOS は「睡眠データがありません。許可していない場合は、設定 → …」、Android は「睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください」（3.1 の全文と一致） | U4-3 |
+| T116 | `ready`・睡眠なし・同期失敗（iOS・Android の両方） | 判定 | 「睡眠データの取り込みに失敗しました」（再試行つき）と、その OS の睡眠なしの案内（3.1 の全文と一致）の2つ | U4-4 |
+| T117 | `ready`・睡眠あり・同期失敗 | 判定 | 失敗の表示1つだけ | U4-5 |
+| T118 | 睡眠あり。T113 と同じ `ready` 以外の7組み合わせ（`it.each`） | 判定 | それぞれその状態の案内だけ（睡眠なしの案内はない） | U4-6 |
+| T188 | 前回の同期失敗あり・同期中でない。T113 と同じ `ready` 以外の7組み合わせ（`it.each`）、睡眠なし／あり | 判定 | 失敗の表示は出ず、その状態の案内だけ | U4-4・U4-5・U4-6 |
+| T119 | `ready`・睡眠なし・同期中／睡眠あり・同期中 | 判定 | 前者は「睡眠データを取り込んでいます」だけ、後者は同期中の表示だけ | U4-7 |
+| T120 | `ready`・同期中・前回の同期失敗あり（睡眠なし／あり） | 判定 | 失敗の表示はなく、前者は「睡眠データを取り込んでいます」だけ、後者は同期中の表示だけ | U4-8 |
+
+### 手順10 連携状態の窓口（中間）：`tests/integration/features/sleep-record/sleep-record-access.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T121 | iOS：`isHealthDataAvailable`／`getRequestStatusForAuthorization` を1つずつ失敗させる（同期関数は例外を投げ、非同期関数は reject する。`it.each`） | 連携状態を取得 | 同じエラーが届き、`sleepRecord.checkAccess` の error ログ（渡した `requestId`・`err`） | I3-4 |
+| T122 | Android：`getSdkStatus`／`initialize`／`getGrantedPermissions` を1つずつ reject させる（`it.each`）、および `initialize` が false | 連携状態を取得 | どれもエラーが届き（reject のケースは投げたエラーと同じもの（`toBe`））、`sleepRecord.checkAccess` の error ログ（渡した `requestId`・`err`） | I3-4 |
+| T123 | iOS の `requestAuthorization`／Android の `requestPermission` が reject（`it.each`） | 許可を要求 | 投げたエラーと同じもの（`toBe`）が届き、`sleepRecord.requestAccess` の error ログ | I3-5 |
+| T124 | iOS の `requestAuthorization` が false／true を返す、Android の `requestPermission` が空配列を返す | 許可を要求 | どれも例外なく終わり、`sleepRecord.requestAccess` の info ログ（`requestId`） | I3-5 |
+| T125 | 同上 | 許可を要求 | iOS は `toRead` が `['HKCategoryTypeIdentifierSleepAnalysis']` だけで `toShare` が空／なし。Android は `[{ accessType: 'read', recordType: 'SleepSession' }]` だけ | I3-5 |
+| T126 | Android | 設定を開く | `openHealthConnectSettings` が1回呼ばれる | I3-6 |
+| T127 | Android で `openHealthConnectSettings` が例外／iOS で呼ぶ | 設定を開く | どちらもエラーが届き（Android は投げたエラーと同じもの（`toBe`））、`sleepRecord.openSettings` の error ログ | I3-6 |
+
+### 手順11 読み取りの窓口（中間）：`tests/integration/features/sleep-record/sleep-record-query.service.test.ts`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T128 | DB に手順14 のシード S と同じ睡眠とステージ | 一覧と `2026-11-25` の詳細を取る | 一覧は `2026-11-25`（合計 462分・就寝 `2026-11-24T23:14`・起床 `2026-11-25T06:46`・昼寝1件）、`2026-11-24`（合計 420分・`23:00`〜`06:00`・昼寝0件）の順。詳細は主睡眠 432分、内訳 深い 90分 20%・浅い 280分 62%・REM 62分 14%・覚醒 20分 4%、昼寝 `13:00`〜`13:30` 30分の1件 | I5-1 |
+| T129 | テスト用DBを閉じる | 一覧／詳細を取る | どちらも DB が投げたエラーと同じもの（`toBe`）が届き、`sleepRecord.loadList`／`sleepRecord.loadDetail` の error ログに渡した `requestId` があり、詳細のログの文字列に `2026-11-25` が含まれない | I5-2 |
+
+### 手順12 マイグレーションの適用（中間）：`tests/integration/lib/migration-gate.test.tsx`
+
+最初に `useMigrations` が better-sqlite3 の DB で動くかを確かめる（動かなければ止めて相談）。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T130 | 正しいマイグレーション。テスト用DBの補助を使わず、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す | 子要素「child」を包んで描画 | 適用が終わる前は「child」が出ず、待つと「child」が出る（失敗の表示は出ない）。描画後の DB に `sleep_sessions`・`sleep_stages`・`sleep_sync_state` がある | I4-11（対照） |
+| T131 | `@/drizzle/migrations` を壊れた SQL を含むものに差し替え | 同上 | 「データベースの準備に失敗しました」が出て「child」は出ない。`app.migrate` の error ログ（`err`） | I4-11 |
+
+### 手順13 同期の受け口（中間）：`tests/integration/features/sleep-record/sleep-record.store.test.ts`・`use-sleep-record-sync.test.tsx`
+
+手順13〜15 では、各テストの前に `jest.resetModules()` してから store を読み込み直す（store の状態と、重複防止のための実行中の Promise を前のテストから持ち越さない。`Platform.OS` を切り替える `it.each` も、各ケースで読み込み直す）。`Platform.OS` は `ios`（Android のケースだけ `android`）。同期中の状態は `queryCategorySamples` が返す Promise を保留にして作る。
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T132 | `ready`、読み取りを保留 | `sync()` を2回呼び、そのあと保留を解く | `queryCategorySamples` は1回だけ。2回目の Promise は1回目が終わるまで解決しない（解く前は未解決、解いたあと両方解決） | I4-6 |
+| T133 | 1回目の同期が成功で終わった／失敗で終わった（2ケース） | もう一度 `sync()` | `queryCategorySamples` がもう1回（計2回）呼ばれる | I4-6 |
+| T134 | `getRequestStatusForAuthorization` を保留 | `refreshAccess()` を2回呼び、保留を解く | 連携状態の取得関数は1回だけ、2回目は1回目の完了を待つ | I4-6 |
+| T135 | `ready` | `sync()` | `getRequestStatusForAuthorization` が1回呼ばれ、そのあとに `queryCategorySamples` が1回呼ばれる | I4-6c |
+| T136 | 1回目の取得が失敗、2回目は `ready` | `sync()` を2回（2回目は再試行の再現） | 1回目のあとは読み取り0回で状態が `checkFailed`。2回目のあとは読み取り1回で状態が `ready` | I4-6c |
+| T137 | `notRequested`、要求成功後は `ready`。`requestAuthorization` が `true`／`false` を返す（2ケース） | `requestAccess()` | 要求のあと連携状態を取り直し（取得関数が要求後に1回）、同期が1回走る | I4-6c |
+| T196 | Android `notGranted`、`requestPermission` 成功後は `getGrantedPermissions` に睡眠の読み取りあり | `requestAccess()` | 要求のあと連携状態を取り直して `ready` になり、`readRecords` が1回呼ばれる | I4-6c |
+| T138 | 1回目の同期が失敗（`lastSyncError` あり） | 2回目の同期を成功させる | `lastSyncError` が消え、データの版番号が上がる。1回目の失敗では版番号が上がっていない | I4-6c |
+| T186 | `ready`、モックが0件 | `sync()` | 成功扱いで、版番号が上がる（3.1「同期が成功すると版番号が上がる」。0件も成功扱い） | I4-6c |
+| T139 | iOS の `notRequested`・`unavailable`・取得失敗（`checkFailed`）、Android の `notGranted`・`unavailable`・`updateRequired`・取得失敗（`checkFailed`）（`it.each`） | `sync()` | 連携状態の取得だけで、`queryCategorySamples`・`readRecords` は呼ばれない | I4-6c・I4-12 |
+| T140 | `ready`・読み取りを保留して同期中。`requestAccess()` を呼び、要求を成功させてから保留を解く | 完了を待つ | 読み取りが計2回呼ばれ、2回目は1回目の完了後。`requestAccess()` のあとの連携状態の取得はちょうど1回（新しい `sync()` の中だけ）で、2回目の読み取りより前 | I4-6d |
+| T187 | iOS | `openSettings()` | store の「設定を開くの失敗」の値が真になり（3.3 の store の状態）、`sleepRecord.openSettings` の error ログが出る | I4-2b |
+| T141 | 連携状態の取得関数が reject | `refreshAccess()` | store の連携状態が `checkFailed` | I4-12b |
+| T142 | 連携状態の窓口と同期サービスの関数に、中身を差し替えない `jest.spyOn` を付ける。`ready` で、表にないステージ値を含むサンプルを返す | `sync()` を2回 | 各 `sync()` で、連携状態の窓口に渡った `requestId` と同期サービスに渡った `requestId` が同じ値。その値が `sleepRecord.fetchFromHealth` の warn ログと `sleepRecord.sync` の info ログの `requestId` とも一致する。1回目と2回目の値は違う。続けて `requestAccess()`（成功）を呼ぶと、その `sleepRecord.requestAccess` の info ログの `requestId` と、続く `sync()` で連携状態の窓口に渡る `requestId` が違う値になる | I4-13b |
+| T143 | `ready` | `use-sleep-record-sync` を `renderHook` で描画 | 連携状態の取得と `queryCategorySamples` がそれぞれ1回 | I4-5 |
+| T144 | 描画済み・初回の同期が終わった | `AppState` を `background`→`active` にする | 連携状態の取得と読み取りがもう1回ずつ走る | I4-7 |
+| T145 | 同上 | `AppState` を `active`→`inactive`→`active` にする | 追加の取得・読み取りは走らない | I4-6e |
+| T146 | iOS の `notRequested`・`unavailable`・`checkFailed`、Android の `notGranted`・`unavailable`・`updateRequired`・`checkFailed`（`it.each`） | 描画し、`background`→`active` にする | どちらの契機でも `queryCategorySamples`・`readRecords` は呼ばれない | I4-12 |
+
+### 手順14 一覧と案内（中間）：`tests/integration/features/sleep-record/sleep-record-list-screen.test.tsx`
+
+`renderRouter` で実際の `src/app/` を読み込み、`/` を開く。手順14・15 で「シード S」と書いたものは次のデータ（DB に入れる場合も、ネイティブのモックが返す場合も同じ睡眠）。
+
+- `2026-11-25`：主睡眠 `2026-11-24T23:14`〜`2026-11-25T06:46`（`deep` 90分・`light` 280分・`rem` 62分・`awake` 20分 → 睡眠時間 432分）、昼寝 `13:00`〜`13:30`（`light` 30分）
+- `2026-11-24`：主睡眠 `2026-11-23T23:00`〜`2026-11-24T06:00`（`light` 420分）、昼寝なし
+- 一覧の期待表示（以下「S の一覧」）：1行目「11月25日（水）」「7時間42分」「23:14〜6:46」「昼寝 1件」、2行目「11月24日（火）」「7時間0分」「23:00〜6:00」で「昼寝」の文字なし
+- 詳細 `2026-11-25` の期待表示（以下「S の詳細」）：「23:14〜6:46」「7時間12分」、昼寝「13:00〜13:30」「30分」
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T147 | `ready`、DB にシード S | 一覧を開く | S の一覧（行の順も含めて一致） | I4-1 |
+| T148 | 同上 | 1行目をタップ（手順15で詳細のルートを作ってから足す） | 詳細の URL が `/sleep/2026-11-25` になり、S の詳細が出る | I4-1 |
+| T149 | `@/drizzle/migrations` を壊れたものに差し替え | `/` を開く | 「データベースの準備に失敗しました」が出て、`queryCategorySamples`・連携状態の取得関数が呼ばれない | I4-11b |
+| T150 | iOS `notRequested`、要求成功後は `ready`、DB 空、モックはシード S を返す | 「ヘルスケアと連携する」を押す | `requestAuthorization` が1回呼ばれ、同期して S の一覧が出る 。Android（`notGranted`、許可後は `ready`）でも「ヘルスコネクトと連携する」を押すと `requestPermission` が1回呼ばれ、S の一覧が出る | I4-2 |
+| T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン | I4-2 |
+| T152 | Android `notGranted`、要求後も `notGranted` | 「ヘルスコネクトと連携する」を押す | 案内は `notGranted` のまま、`readRecords` が呼ばれない | I4-2b |
+| T153 | Android `notGranted` | 設定を開くボタンを押す | `openHealthConnectSettings` が1回呼ばれる | I4-2b |
+| T154 | `openHealthConnectSettings` が1回目は例外、2回目は保留 | 押す → もう一度押す | 1回目のあと「ヘルスコネクトの設定を開けませんでした。設定アプリからヘルスコネクトを開いてください」が出る。2回目を押すと、保留中のうちに表示が消える | I4-2b |
+| T155 | iOS `notRequested`、`requestAuthorization` が1回目だけ例外 | 押す | 「連携の要求に失敗しました」が出て、ボタンは押せる（`disabled` でない）。連携状態の取得関数は押す前から呼び出し回数が増えない | I4-3 |
+| T156 | T155 と同じ前提を、この項目の中で作る。2回目の `requestAuthorization` は保留 | 押して失敗させ、もう一度押す | 2回目を押すと、保留中のうちに「連携の要求に失敗しました」が消え、`requestAuthorization` が2回目に呼ばれている | I4-3 |
+| T157 | `requestAuthorization` を保留 | 押す → 保留中にもう一度押す | 保留中はボタンが `disabled`、`requestAuthorization` は1回だけ | I4-3 |
+| T158 | iOS。`getRequestStatusForAuthorization` が1回目だけ例外、2回目は `shouldRequest` | 一覧を開く → 「再試行」を押す | 「ヘルスケアの状態を確認できませんでした」と「再試行」が出て、押すと取得関数が再び呼ばれ、表示が「ヘルスケアと連携する」ボタンに替わる | I4-4 |
+| T159 | `ready`、DB にシード S。起動時の同期が終わってから、2回目の読み取りだけを保留する | 下に引く（`RefreshControl` の `onRefresh`） → 保留を成功／失敗で解く（2ケース） | 引くと読み取り関数がもう1回（起動時の分と合わせて2回）呼ばれ、引いている間 `refreshing` が true、解くとどちらも false | I4-6b |
+| T160 | `notRequested`、DB に睡眠あり | 下に引く | 連携状態の取得関数が起動時の分に加えてもう1回（計2回）呼ばれ、読み取り関数は呼ばれず、`refreshing` が false に戻る | I4-6b |
+| T194 | iOS `ready`、DB にシード S。一覧が出たあと、次の `getRequestStatusForAuthorization` は reject | 下に引く | `refreshing` が false に戻り、読み取り関数は呼ばれず（起動時の1回のまま）、「ヘルスケアの状態を確認できませんでした」と「再試行」が出て、S の一覧は出たまま | I4-6b |
+| T161 | `ready`、DB にシード S。起動時の読み取りは例外、2回目の読み取りは保留 | 一覧を開く → 「再試行」を押し、保留中の表示を見てから成功で解く | 「睡眠データの取り込みに失敗しました」と「再試行」が出て、S の一覧は表示されたまま。押すと読み取りが再び呼ばれ、保留中は失敗表示が消えて同期中の表示（`testID`）だけになる。解くと失敗表示が出ないまま終わる | I4-8 |
+| T162 | DB にシード S。一覧画面のコンポーネントを `renderRouter` を通さず直接描画する（マイグレーションはテスト用DBの補助で適用済みのため `MigrationGate` を通さない）。描画の前に連携状態を `notRequested` で取得済みにし（同期が走らない）、テスト用DBを閉じる | 描画 → DB を開き直して「再試行」 | 「睡眠データを読み込めませんでした」と「再試行」、`sleepRecord.loadList` の error ログ。押すと S の一覧が出る | I4-9 |
+| T163 | Android `notGranted`、DB にシード S | 一覧を開き、1行目をタップ | 「ヘルスコネクトと連携する」ボタン・「許可しなかった場合は、ヘルスコネクトの設定から許可してください」・設定を開くボタンと一緒に S の一覧が出て、タップで S の詳細が出る | I4-13 |
+| T164 | `ready`、DB 空、読み取りを保留（解くとシード S を返す） | 一覧を開く → 保留を解く | 保留中は「睡眠データを取り込んでいます」が出て「睡眠データがありません」は出ない。解くと S の一覧が出る | I4-16 |
+| T165 | 連携状態の取得を保留 | 一覧を開く | 「読み込み中」だけが出て、案内・空の表示は出ない | I4-16 |
+| T180 | 連携状態は iOS `notRequested` で取得済み（同期が走らない）、DB にシード S | 一覧を開き、`render` の直後（`findBy*` で待つ前）と、待ったあとの表示を見る | 直後は「読み込み中」だけで、案内・行・「睡眠データがありません」は出ない。待つと「ヘルスケアと連携する」ボタンと S の一覧が出る | I4-16 |
+| T184 | 一覧が出たあと、2回目の連携状態の取得（`getRequestStatusForAuthorization`）を保留 | `background`→`active` にし、保留中の表示を見てから保留を解く | 保留中も T147 と同じ行が出たままで、「読み込み中」・案内は出ない | I4-16 |
+| T166 | DB にシード S。一覧が出たあと、読み取りを保留 | `background`→`active`／下に引く（2ケース） | どちらも保留の間、S の一覧が出たままで「読み込み中」が出ない（同期成功のあとの読み直しは better-sqlite3 で同期的に終わり、間を外から見られないため、このリストでは T174 の内容の更新で確かめる） | I4-16 |
+| T167 | `ready`、DB に睡眠あり、読み取りを保留 | 一覧を開く | 行が出たまま、上部に同期中の表示が出る | I4-17 |
+
+### 手順15 詳細（中間）：`tests/integration/features/sleep-record/sleep-record-detail-screen.test.tsx`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T168 | DB にシード S | `/sleep/2026-11-25` を開く | 「23:14〜6:46」「7時間12分」、内訳が「深い 1時間30分 20%」「浅い 4時間40分 62%」「REM 1時間2分 14%」「覚醒 20分 4%」の順（分母 452分）で、不明の行はない。昼寝は「13:00〜13:30」「30分」で、内訳に昼寝の分は入らない | I4-10 |
+| T169 | `2026-11-25` の主睡眠が `unspecified` `2026-11-24T23:00`–`2026-11-25T06:00` の1区間だけ（ステージなし・420分） | `/sleep/2026-11-25` を開く | 「23:00〜6:00」「7時間0分」と「ステージ情報なし」が出て、内訳の行は出ない | I4-10 |
+| T192 | DB の `2026-11-25` の主睡眠が T191 と同じ（ステージあり・区間は `light` 59秒・`deep` 59秒） | `/sleep/2026-11-25` を開く | 「ステージ情報なし」が出て、内訳の行は出ない | I4-10 |
+| T170 | `2026-11-25` に睡眠なし | `/sleep/2026-11-25` を開く | 「この日の睡眠データはありません」 | I4-10 |
+| T171 | — | `/sleep/2026-02-30`・`/sleep/abc` を開く | 「日付が正しくありません」 | I4-10 |
+| T172 | DB にシード S。T162 と同じく、詳細画面のコンポーネントに `date = '2026-11-25'` を渡して直接描画する。描画の前に連携状態を `notRequested` で取得済みにし、テスト用DBを閉じる。| 描画 → DB を開き直して「再試行」 | 「睡眠データを読み込めませんでした」と「再試行」、`sleepRecord.loadDetail` の error ログに日付が含まれない。押すと S の詳細が出る | I4-9b |
+| T173 | `ready` | 起動の URL を `/sleep/2026-11-25` にして描画 | 連携状態の取得と読み取りがそれぞれ1回 | I4-14 |
+| T185 | DB にシード S。起動時の同期の読み取りを保留し、モックは `2026-11-24` の睡眠だけを返す | `/sleep/2026-11-25` を開いて「23:14〜6:46」を確かめ、保留を解いて同期を終える | 表示が「この日の睡眠データはありません」に変わる | I4-15 |
+| T174 | DB にシード S。起動時の同期の読み取りを保留し、モックは同じ睡眠を起床 7:10 にしたサンプルを返す | `/sleep/2026-11-25` を開いて「23:14〜6:46」を確かめ、保留を解いて同期を終える | 表示が「23:14〜7:10」に変わる | I4-15 |
+| T175 | 連携状態は `ready` で取得済み（取得のモックは即座に返す）、DB にシード S | `/sleep/2026-11-25` を開き、`render` の直後（`findBy*` で待つ前）と、待ったあとの表示を見る | 直後は「読み込み中」だけで、主睡眠・「この日の睡眠データはありません」は出ない。待つと S の詳細が出る | I4-16 |
+
+### 手順16 E2E（Maestro）：`tests/e2e/`
+
+| ID | 前提 | 操作 | 期待結果 | 対応 |
+| --- | --- | --- | --- | --- |
+| T176 | Android で実行（iOS は環境が決まってから）。`onFlowStart`：`clearState`、許可を取り消し、シード「数日分」 | 起動 → 「連携する」→ OS の許可画面で許可 | シード定義から算出した最新日の日付・合計睡眠時間・就寝〜起床の文字列が1行目に出て、タップすると同じ日の就寝〜起床・睡眠時間の文字列が詳細に出る（`sleep-flow.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E1 |
+| T177 | 同上（Android） | 「連携する」→ 許可しない | 「許可しなかった場合は、ヘルスコネクトの設定から許可してください」と設定を開くボタン（`deny-android.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E2 |
+| T178 | 同上（iOS。実行は環境が決まってから） | 「連携する」→ 許可しない | 許可の確認手順つきの「睡眠データがありません。…」（`deny-ios.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E2 |
+| T179 | Android で実行（iOS は環境が決まってから）。`onFlowStart`：`launchApp`（`clearState: true`）で DB を消し、シード「睡眠なし」に入れ替え、睡眠の読み取りを許可する（`clearState` で許可が消えるかを最初に確かめ、付け直す手順を `tests/e2e/seed/` に書く） | 起動 | 「睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください」（`no-data.yaml`）。iOS のフローでは「睡眠データがありません。許可していない場合は、設定 → ヘルスケア → データアクセスとデバイス → suimin-app で睡眠を許可してください。SOXAI アプリのヘルスケア連携も確認してください」。`onFlowComplete` でシードを「数日分」に戻す | E3 |
+
+### このリストで扱った・扱わなかった持ち越し事項（plan 9ラウンド目の P2）
+- テスト番号の並び：リストは実装順に並べ、通し番号 `T001`〜で振った（5 の番号は「対応」に残す）
+- 単体テストのファイルパス：各節の見出しに置き場所を書いた（`sleep-record-date.service.ts` の U2-8 は `sleep-record-date.service.test.ts` に分けた）
+- 未整列入力の並べ替え：T022・T043・T054 を追加した
+- 詳細画面の日付見出し・案内、`start_at` のインデックス：設計の変更が要るため、このリストでは扱わない。人間の判断で TODO とした（2026-11-25）
+
 ## レビュー記録
 <!-- ai-review スキルが合格時に1行ずつ追記する（例：- 2026-11-18 plan 合格（1ラウンド）） -->
 - 2026-11-25 plan 合格（9ラウンド。9ラウンド目の P1 4件を修正後、再レビューせず人間の判断で合格。9ラウンド目の P2 のうち未対応の6件（テスト番号の並び、単体テストのファイルパス、詳細画面の日付見出し・案内、並べ替えのケース、`start_at` のインデックス）は test 段階で扱う）
+- 2026-11-26 test 合格（5ラウンド。5ラウンド目の P1 2件・P2 12件を修正後、再レビューせず人間の判断で合格。TODO：詳細画面の日付見出し・案内、`start_at` のインデックス、版番号の更新後の読み直し中に「読み込み中」が出ないことの確認方法（T166））
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
