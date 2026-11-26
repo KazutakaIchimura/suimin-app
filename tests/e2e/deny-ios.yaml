@@ -1,0 +1,18 @@
+# E2 拒否したときの案内・iOS（テストリスト T178）
+# シミュレータのヘルスケアへの投入方法と、許可を「未要求」に戻す方法が決まるまで実行しない。
+# それまでは準備（onFlowStart）と後始末（onFlowComplete）を置かず、フロー本体だけを書く
+appId: dev.suimin.app
+tags:
+  - ios
+---
+- launchApp
+- tapOn: ヘルスケアと連携する
+# OS（ヘルスケア）の許可シートで許可しない
+- tapOn: 許可しない
+# 拒否は判別できず ready になり、同期で0件になってからこの案内が出る
+- extendedWaitUntil:
+    visible: 睡眠データがありません。許可していない場合は、設定 → ヘルスケア → データアクセスとデバイス → suimin-app で睡眠を許可してください。SOXAI アプリのヘルスケア連携も確認してください
+    timeout: 60000
+- assertNotVisible: ヘルスケアと連携する
+- assertNotVisible:
+    id: sleep-record-row

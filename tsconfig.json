@@ -3,18 +3,13 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@/assets/*": [
-        "./assets/*"
-      ]
-    }
+      "@/drizzle/*": ["./drizzle/*"],
+      "@/*": ["./src/*"],
+      "@/assets/*": ["./assets/*"]
+    },
+    "types": ["jest", "node"]
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  // E2E のシードアプリは別の Expo プロジェクト（依存も設定も別）なので、そのフォルダで型チェックする
+  "exclude": ["node_modules", "tests/e2e/seed/seeder-app"]
 }

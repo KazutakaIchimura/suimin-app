@@ -1,0 +1,8 @@
+# 本体のデータ（DB）を消して起動し直し、睡眠の読み取りの許可を環境変数 READ_SLEEP（allow／deny）にする（設計書 3.3「E2E」）
+appId: dev.suimin.app
+---
+- launchApp:
+    clearState: true
+    stopApp: true
+    permissions:
+      android.permission.health.READ_SLEEP: ${READ_SLEEP}

@@ -1,0 +1,16 @@
+# シードアプリを起動して、環境変数 SEED のシードをヘルスコネクトへ入れる（設計書 3.3「E2E」）
+appId: dev.suimin.e2eseeder
+---
+- launchApp:
+    stopApp: true
+- tapOn: ${SEED}
+# 初回だけ、書き込みの許可画面が出る（文言は README の「最初の実行で確かめること」）
+- tapOn:
+    text: すべて許可
+    optional: true
+- tapOn:
+    text: 許可
+    optional: true
+- extendedWaitUntil:
+    visible: 投入完了：${SEED}
+    timeout: 30000

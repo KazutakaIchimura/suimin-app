@@ -1,0 +1,13 @@
+# 後始末：シードを「数日分」に戻し、本体の睡眠の読み取りを許可に戻す（フローが失敗しても onFlowComplete から呼ばれる）
+appId: dev.suimin.app
+---
+- runFlow:
+    file: seed.yaml
+    env:
+      SEED: 数日分
+- launchApp:
+    appId: dev.suimin.app
+    stopApp: true
+    permissions:
+      android.permission.health.READ_SLEEP: allow
+- stopApp

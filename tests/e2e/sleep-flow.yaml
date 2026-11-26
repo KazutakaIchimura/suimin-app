@@ -1,0 +1,45 @@
+# E1 許可して表示（テストリスト T176）
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 数日分
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: deny
+onFlowComplete:
+  - runFlow: subflows/restore.yaml
+---
+# シードの最新日の表示文字列を output.latest* に求める
+- runScript:
+    file: seed/sleep-seed.js
+    env:
+      SEED: 数日分
+- extendedWaitUntil:
+    visible: 許可しなかった場合は、ヘルスコネクトの設定から許可してください
+    timeout: 30000
+- tapOn: ヘルスコネクトと連携する
+# OS（ヘルスコネクト）の許可画面で許可する
+- tapOn:
+    text: すべて許可
+    optional: true
+- tapOn: 許可
+- extendedWaitUntil:
+    visible: ${output.latestDate}
+    timeout: 60000
+- assertVisible: ${output.latestTotal}
+- assertVisible: ${output.latestTime}
+- assertNotVisible: 許可しなかった場合は、ヘルスコネクトの設定から許可してください
+- assertNotVisible: ヘルスコネクトと連携する
+# 1行目（最新日）をタップして詳細へ
+- tapOn:
+    id: sleep-record-row
+    index: 0
+- extendedWaitUntil:
+    visible: ${output.latestMainTotal}
+    timeout: 30000
+- assertVisible: ${output.latestTime}

@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "suimin-e2e-seeder",
+    "slug": "suimin-e2e-seeder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "android": {
+      "package": "dev.suimin.e2eseeder",
+      "permissions": ["android.permission.health.WRITE_SLEEP"]
+    },
+    "plugins": [
+      "react-native-health-connect",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
+        }
+      ]
+    ]
+  }
+}
