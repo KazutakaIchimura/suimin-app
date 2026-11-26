@@ -122,7 +122,7 @@
 - 許可の要求で求めるのは睡眠の読み取りだけにする（iOS：`toRead` は `HKCategoryTypeIdentifierSleepAnalysis` だけで `toShare` は空、Android：`{ accessType: 'read', recordType: 'SleepSession' }` だけ）。要件の「ヘルスケアへは読み取りのみ」を守るため
 - 「設定を開く」（Android：`openHealthConnectSettings`）が例外を投げたときは、「ヘルスコネクトの設定を開けませんでした。設定アプリからヘルスコネクトを開いてください」を表示する
 - 読み込み中の表示
-  - 連携状態がまだ一度も取れていないとき、または一覧・詳細を**初めて** DB から読んでいる間だけ、「読み込み中」の表示だけを出す（案内・空の表示は出さない）。2回目以降の連携状態の取得・読み直し（前面復帰・下に引く・同期後の版番号の更新）の間は、それまでの表示を出したままにする
+  - 連携状態がまだ一度も取れていないときだけ、「読み込み中」の表示だけを出す（案内・空の表示は出さない）。一覧・詳細の DB の読み取りは同期関数なので、フックは描画の中で読み（版番号・再試行の回数が変わったときだけ読み直す）、「DB を読んでいる間」の表示の状態を持たない。こうして、読み終える前の誤った案内・空の表示が出ないことを作りで守る（impl レビューで確認）。2回目以降の連携状態の取得・読み直し（前面復帰・下に引く・同期後の版番号の更新）の間は、それまでの表示を出したままにする
   - `ready` で DB に睡眠がなく同期中なら、「睡眠データを取り込んでいます」を出し、下の「睡眠データがありません」の案内は出さない（初回同期の途中に誤った案内を出さないため）
   - DB に睡眠があって同期中なら、一覧を表示したまま上部に同期中の表示を出す
   - 同期中は、前回の同期の失敗表示を出さない（再試行を押したら、結果が出るまでは同期中の表示だけにする）。失敗表示は同期が失敗で終わったときに出し、次の同期が成功したら消す
@@ -182,6 +182,7 @@
 | パス | 変更 |
 | --- | --- |
 | `app.json` | `plugins` に次を追加する。`@kingstinct/react-native-healthkit`（`NSHealthShareUsageDescription` に日本語の説明、`NSHealthUpdateUsageDescription: false`、`background: false`）、`react-native-health-connect`、`expo-build-properties`（`android.compileSdkVersion: 36`・`targetSdkVersion: 36`・`minSdkVersion: 26`。`react-native-health-connect` v4 の README の Expo 設定例どおり）。`android.permissions` に `android.permission.health.READ_SLEEP` を追加する。Expo 構成では `MainActivity` の変更は要らない（同梱の Expo モジュールが許可結果の受け取りを登録する） |
+| `app.json`（impl レビューで追加） | `android.allowBackup: false` を追加する。Android の自動バックアップで、睡眠の DB（健康情報）が Google ドライブへ送られないようにする（要件「データは端末内にのみ保存し、外部サーバーへ送信しない」）。バックアップから復元できなくなるが、睡眠はヘルスケアから取り直せる（iOS は90日分、Android は許可の30日前まで）。iOS の iCloud・端末のバックアップから DB を外す方法は、実機で確かめる必要があるため TODO とする |
 | `tsconfig.json`・`jest.config.js` | パス別名 `@/drizzle/*` → `drizzle/*` を、既存の `@/*` → `src/*` より優先して解決されるように追加する（`src/lib/migration-gate.tsx` が `drizzle/migrations.js` を `@/` から始まるパスで import するため。architecture.md の「import は `@/` から始める」に合わせる） |
 | `jest.config.js`・`tests/setup/global-setup.js` | `globalSetup` で `process.env.TZ = 'Asia/Tokyo'` にし、日付の扱いをテスト環境で固定する（`npm test` 以外で jest を起動しても効くように、スクリプトではなく設定で行う） |
 | `package.json` | 開発用に `better-sqlite3`・`@types/better-sqlite3` を追加（`npx expo install better-sqlite3 @types/better-sqlite3 -- --save-dev`）。`better-sqlite3` のインストール時スクリプト（ソースからのビルド）は `npm install-scripts deny` で実行しない（開発コンテナの Python ではビルドが失敗するため。パッケージに同梱のビルド済みバイナリ `prebuilds/linux-x64.node` を使う） |
@@ -194,7 +195,7 @@
 | `src/lib/request-id.ts` | 1回の操作の相関ID（ランダムな文字列）を作る |
 | `src/lib/clock.ts` | 現在時刻（`Date`）を返す。業務ロジックはこれを直接呼ばず、受け口層から引数で渡す |
 | `src/lib/db.ts` | `getDb()` を公開する。初回の呼び出しで `expo-sqlite` の `openDatabaseSync` で DB を開き、以後は同じ接続を使い回す。開くときに`PRAGMA foreign_keys = ON` を実行し、各機能の `*.schema.ts` を集めた Drizzle インスタンスを返す。ネイティブモジュールに依存するためコンテナ内のテストでは確かめない（テストの対象外に記載）。テスト用DBの補助も同じ PRAGMA を実行する |
-| `src/lib/migration-gate.tsx` | `drizzle-orm/expo-sqlite/migrator` の `useMigrations` に `@/lib/db` の DB と `@/drizzle/migrations` を渡してマイグレーションを適用し、完了まで子要素を出さない。失敗したら「データベースの準備に失敗しました」と表示し、`app.migrate` の error ログを出す。どの機能にも属さない起動時の基盤なので `src/lib/` に置く |
+| `src/lib/migration-gate.tsx` | `drizzle-orm/expo-sqlite/migrator` の `useMigrations` に `@/lib/db` の DB と `@/drizzle/migrations` を渡してマイグレーションを適用し、完了まで子要素を出さない。失敗したら「データベースの準備に失敗しました」と表示し、`app.migrate` の error ログを出す。DB を開けない（`getDb()` が例外を投げる）ときも同じ表示とログにする（描画の外へ例外を出してアプリを落とさない）。ログはエラーが変わったときに1回だけ出す。開けなかったあとは開き直さず、アプリを起動し直すまで失敗の表示のままにする。どの機能にも属さない起動時の基盤なので `src/lib/` に置く |
 | `src/lib/db.types.ts` | `@/lib/db` が返す DB の型（同期型の `BaseSQLiteDatabase`）。テストで `@/lib/db` を better-sqlite3 の DB に差し替えても、型が合うようにする |
 
 #### 睡眠記録（`src/features/sleep-record/`）
@@ -227,9 +228,9 @@
 - サービス層はリポジトリを通常の import で使う。DB 接続（`@/lib/db`）を import するのは DB リポジトリ（`sleep-record.repository.ts`）と `src/lib/migration-gate.tsx` だけにし、サービス層は DB に触れない。依存を外から注入する仕組みは作らない
 - テストでは次の外部I/Oの境界だけを `jest.mock` で差し替える
   - ネイティブライブラリ（`@kingstinct/react-native-healthkit`・`react-native-health-connect`）→ テスト用の実装
-  - `@/lib/db` → better-sqlite3 に実際のマイグレーションを適用した DB（中身は本物の SQL）
+  - `@/lib/db` → better-sqlite3 に実際のマイグレーションを適用した DB（中身は本物の SQL）。I4-11 だけは、マイグレーションを適用していない空の DB（T130・T131）、または呼ばれると例外を投げる `getDb`（DB を開けない場合。T209）
   - `react-native` の `Platform.OS`・`AppState`（OS の切り替え・前面復帰の再現。読むのはフックと store だけ）
-  - `@/drizzle/migrations` → I4-11 だけで、次の2通りに差し替える。どちらも DB への入力データの差し替えであり、アプリのロジックは差し替えない
+  - `@/drizzle/migrations` → I4-11・I4-11b だけで、次の2通りに差し替える。どちらも DB への入力データの差し替えであり、アプリのロジックは差し替えない
     - 適用できない壊れた SQL を含むマイグレーション（失敗を起こすとき）
     - 中身は本物のマイグレーションのまま、マイグレーション一覧（`journal.entries`）の読み出しをテストが解くまで止めておくもの（適用が終わる前の表示を見るとき。RNTL 14 の `render` は非同期で、`await render(...)` が画面の更新が落ち着くまで待つため、止めないと描画が返った時点で適用が済んでいる）
 - I4 では `jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] })` と `jest.setSystemTime()` で現在時刻を固定する（`@/lib/clock` は実時計を返すため、取り込み範囲とシードの起床時刻が実行日で変わらないようにする。Promise と RNTL の `waitFor`・`findBy*` が止まらないよう、`Date` とタイマー以外は偽装しない。ただし `renderRouter` は中で既定の設定の `jest.useFakeTimers()` を呼び直すため、手順14・15 の描画のあとはこの限りでない（固定した時刻は引き継がれ、`findBy*` で待てることを 2026-11-26 に確かめた））
@@ -263,6 +264,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - 最初の実行で確かめること（結果は `tests/e2e/seed/README.md` に書く）
   - `launchApp` の `permissions`（または `setPermissions`）に `android.permission.health.READ_SLEEP` を指定して効くか。効かなければ、ヘルスコネクトの設定画面を Maestro で操作して切り替える部品フローに置き換える
   - `clearState: true` でヘルスコネクトの許可が消えるか残るか
+  - 本体の開発ビルドの `AndroidManifest.xml` に `android:allowBackup="false"` が入っているか。あわせて、機種変更時の端末間の直接転送で DB が移るか（Android の版による）
   - T177 で「許可しない」を繰り返したとき（3.1 の「2回拒否すると OS の許可画面が出なくなる」）、`reset-app.yaml` で拒否の回数が戻るか。戻らなければ、実行の前にパソコン側で許可の印を消す手順（`adb shell pm clear-permission-flags` など）を README に書き、`maestro test` を1回実行する前に1度だけ流す（Maestro はパソコン側のコマンドを実行できないため、フローの中には入れない。T177 の拒否は1回の実行で1回だけなので、実行の前の1度で足りる）
 - シードアプリは単体・中間テストの対象にしない（テストの道具であり、正しく入れられたかは E1 で `sleep-seed.js` から算出した文字列と一致することで分かる）。型チェックとリントは本体と同じく通す
 - iOS：シードアプリは Android だけ。iOS のフローは `deny-ios.yaml` だけを書き、シミュレータのヘルスケアへの投入方法と許可の取り消し方法が決まるまで実行しない（それまでは PR 本文に「iOS の E2E は未実行」と書く）
@@ -291,7 +293,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | `sleepRecord.openSettings` | error | 設定を開くの失敗 | `requestId`・`err` |
 | `sleepRecord.loadList` | error | 一覧の読み取りの失敗 | `requestId`・`err` |
 | `sleepRecord.loadDetail` | error | 詳細の読み取りの失敗 | `requestId`・`err`（日付は出さない） |
-| `app.migrate` | error | マイグレーションの失敗 | `err` |
+| `app.migrate` | error | DB を開けない・マイグレーションの失敗 | `err` |
 
 - 取り込み範囲の日数は、`(now − 取り込み範囲の開始) ÷ 24時間` を小数第1位で四捨五入した数値（例：7日と5時間 → `7.2`、90日 → `90`）
 - 睡眠データそのもの（時刻・ステージ・帰属日）はログに出さない。件数と日数だけ
@@ -421,7 +423,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
   - I4-9 一覧の読み取りが失敗すると（テスト用DBを閉じて起こし、再試行の前に開き直す）「睡眠データを読み込めませんでした」と「再試行」が出て、`sleepRecord.loadList` の error ログが出る。「再試行」で読み直して一覧が出る
   - I4-9b 詳細の読み取りが失敗すると（I4-9 と同じ起こし方）「睡眠データを読み込めませんでした」と「再試行」が出て、`sleepRecord.loadDetail` の error ログが出る。ログに日付が含まれない。「再試行」で読み直して詳細が出る
   - I4-10 詳細に主睡眠（就寝〜起床・睡眠時間）・ステージ内訳（各ステージの分と割合）・昼寝が、テストで入れたデータから期待される文字列で出る。ステージなしは「ステージ情報なし」、データのない日は「この日の睡眠データはありません」、不正な日付は「日付が正しくありません」
-  - I4-11 マイグレーションが失敗すると「データベースの準備に失敗しました」が出て、`app.migrate` の error ログが出る（失敗は、`@/drizzle/migrations` を適用できない壊れた SQL を含むマイグレーションに差し替えて起こす。アプリのロジックはモックしない）
+  - I4-11 マイグレーションが失敗すると「データベースの準備に失敗しました」が出て、`app.migrate` の error ログが出る（失敗は、`@/drizzle/migrations` を適用できない壊れた SQL を含むマイグレーションに差し替えて起こす。アプリのロジックはモックしない）。DB を開けない（`@/lib/db` の `getDb` が例外を投げる）ときも、同じ表示と error ログになり、アプリは落ちない
   - I4-11b （`_layout.tsx` を通して）マイグレーションが失敗すると、同期も始まらない（ネイティブの読み取り関数が呼ばれない）
   - I4-12 （フック単体・store 単体）連携状態が `ready` 以外（`notRequested`・`notGranted`・`unavailable`・`updateRequired`・`checkFailed`）なら、起動・前面復帰・`sync` の呼び出しのどれでも同期サービスが呼ばれない
   - I4-12b （store 単体）連携状態の取得でエラーが届くと、連携状態が `checkFailed` になる
@@ -430,7 +432,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
   - I4-14 詳細の URL を直接開いて起動しても、起動時の同期が1回走る
   - I4-15 詳細を表示している間に同期が終わると、詳細が読み直されて新しい内容になる
   - I4-17 DB に睡眠がある状態で同期中は、一覧を表示したまま上部に同期中の表示が出る
-  - I4-16 DB が空で初回同期の途中は「睡眠データを取り込んでいます」が出て「睡眠データがありません」は出ず、同期が終わると一覧が出る。一覧・詳細とも、初めて DB を読んでいる間は「読み込み中」が出る（ただし、連携状態の取得中でない初回の DB 読み取り中の表示は、DB の読み取りが同期関数で保留にできず外から見られないため、テストでは確かめず impl レビューでコードを確かめる。テストでは、連携状態の取得中の「読み込み中」と、読み取り後の最終状態を確かめる）。一覧が出たあとの前面復帰・下に引く・同期後の読み直しの間は、一覧が出たままで「読み込み中」に置き換わらない
+  - I4-16 DB が空で初回同期の途中は「睡眠データを取り込んでいます」が出て「睡眠データがありません」は出ず、同期が終わると一覧が出る。「読み込み中」は連携状態がまだ一度も取れていない間だけ出る。一覧・詳細は DB を描画の中で同期的に読み、「DB を読んでいる間」の表示の状態を持たない（3.1。外から見られないため、テストでは確かめず impl レビューでコードを確かめる。テストでは、連携状態の取得中の「読み込み中」と、読み取り後の最終状態を確かめる）。一覧が出たあとの前面復帰・下に引く・同期後の読み直しの間は、一覧が出たままで「読み込み中」に置き換わらない
 - I5 読み取りの窓口（`sleep-record-query.service.ts`。DB は本物）
   - I5-1 日ごとの要約一覧と1日の詳細が、DB の睡眠から作られて返る
   - I5-2 DB の読み取りが失敗したら（DB を閉じて起こす）、`sleepRecord.loadList`／`sleepRecord.loadDetail` の error ログ（`requestId` 付き、日付なし）が出て、エラーが呼び出し元に届く
@@ -444,6 +446,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - 準備と後始末：各フローの `onFlowStart` で、シードアプリでその回のシードを入れ（部品フロー `seed.yaml`）、本体のデータ（DB）を消して睡眠の読み取りの許可を設定する（`reset-app.yaml`。「未連携」の前提が要る E1・E2 は `deny`、E3 は `allow`）。後始末（シードを「数日分」に戻し、許可を `allow` に戻す。`restore.yaml`）は、フローが途中で失敗しても走るように `onFlowComplete` に置く。準備も `onFlowStart` に置き、前のフローの結果に左右されないようにする
 
 ### テストの対象外
+- `app.json` の `android.allowBackup: false`：コンテナ内では確かめられない。開発ビルドで生成された `AndroidManifest.xml` に `android:allowBackup="false"` が入っていることを、エミュレータで確かめる（E2E の README の「最初の実行で確かめること」に書く）
 - 認可（他人のデータを見られないこと）：アカウントがなく、データは端末内の本人のものだけなので該当しない
 - `src/lib/db.ts`：`expo-sqlite` のネイティブモジュールに依存し、コンテナ内では動かせない。テスト用DBの better-sqlite3 は外部キーが既定で有効（`SQLITE_DEFAULT_FOREIGN_KEYS=1`）なので、`db.ts` の `PRAGMA foreign_keys = ON` の有無はコンテナ内では確かめられない（I1-4・I1-5 で確かめるのは制約の定義だけ）。`expo-sqlite` は既定で無効なため、実機では E2E で睡眠が入れ替わるときに確かめる
 - `src/lib/request-id.ts`・`src/lib/clock.ts`：判定や計算を持たない薄い包み（乱数・現在時刻を返すだけ）のため、単体テストを書かない。使う側のテストでは引数で差し替える
@@ -471,6 +474,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
     - 16b シード定義：`tests/e2e/seed/sleep-seed.js`
     - 16c シードアプリ：`tests/e2e/seed/seeder-app/`（そのフォルダで型チェック・リント）
     - 16d フロー：部品フロー・E1〜E3 のフロー・`tests/e2e/seed/README.md`
+17. impl レビューの指摘で追加：`app.json` の `android.allowBackup: false`（コンテナ内では確かめられない。テストの対象外に記載）
 
 ## 7. コミット前テスト実行
 - `npm test`（単体・中間）
@@ -481,6 +485,8 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - E2E（`maestro test --include-tags=android tests/e2e`）は、開発ビルドを入れたエミュレータ・実機で、マージ前に実行できる環境があれば実行する。実行できなかった場合は PR 本文にその旨を書く
 
 ## 8. スコープ外
+- iOS の iCloud・端末のバックアップから DB を外すこと（2026-11-26 に人間が TODO と判断。`NSURLIsExcludedFromBackupKey` などを実機で確かめる必要があるため TODO。それまで iOS では、利用者がバックアップを有効にしていると DB が iCloud に入りうる。PR 本文にも書く）
+- Android で `allowBackup: false` にしたことによる、クラウドのバックアップからの復元（復元されない。睡眠はヘルスケアから取り直せるが、ヘルスケアで読める期間（Android は許可の30日前まで）より前の履歴は戻らない。2026-11-26 に人間が判断）。機種変更時の端末間の直接転送（外部サーバーを通らない）まで止まるかは、Android の版によって違う可能性があるため、最初の実行で確かめる
 - 週・月のグラフ（02 で別に設計する）
 - バックグラウンドでの同期
 - ヘルスケアへの書き込み
@@ -501,7 +507,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - 共通の前提
   - TZ は `Asia/Tokyo`（`globalSetup` で固定）。時刻はテスト内で `new Date('2026-11-25T06:30:00+09:00').getTime()` のように絶対時刻で書き、現在時刻は引数で渡す（I4 は `jest.setSystemTime('2026-11-25T12:00:00+09:00')`）
   - 中間テストの DB は、better-sqlite3 の一時ファイルに `drizzle/` の実際のマイグレーションを適用し `PRAGMA foreign_keys = ON` を実行したもの（`tests/integration/helpers/`）。各テストの `beforeEach` で新しく作り、`afterEach` で閉じて消す
-  - 差し替えるのは 3.3 に挙げた外部I/Oの境界だけ（ネイティブライブラリ・`@/lib/db`・`Platform.OS`・`AppState`・I4-11 の `@/drizzle/migrations`）
+  - 差し替えるのは 3.3 に挙げた外部I/Oの境界だけ（ネイティブライブラリ・`@/lib/db`・`Platform.OS`・`AppState`・I4-11・I4-11b の `@/drizzle/migrations`）
   - ログは `console.info`／`warn`／`error` を `jest.spyOn` で受け、出力の JSON を `JSON.parse` して検証する
 - 画面・フック・store（手順13〜15）では、特に書かない限り、起動時などの同期でネイティブの読み取りモックは DB のシードと同じ睡眠になるサンプルを返す（入れ替え後も同じ `id`・同じ表示になり、シードの行が消えない）
 - 「同期中の表示」は文言が 3.1 にないため、案内の判定（U4）では案内の種類（例：`{ kind: 'syncing' }`）を、画面では `testID`（`sleep-record-syncing`）で確かめる
@@ -737,6 +743,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | --- | --- | --- | --- | --- |
 | T130 | 正しいマイグレーション。テスト用DBの補助を使わず、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す。`@/drizzle/migrations` は中身が本物のまま、マイグレーション一覧の読み出しを止めたもの（3.3） | 子要素「child」を包んで描画（`await render`）→ 止めていた読み出しを解く | 解く前は「child」も「データベースの準備に失敗しました」も出ず、DB に `sleep_sessions` がない。解いて待つと「child」が出て（失敗の表示は出ない）、DB に `sleep_sessions`・`sleep_stages`・`sleep_sync_state` がある。`app.migrate` のログはどのレベルにも出ない | I4-11（対照） |
 | T131 | T130 と同じ、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す。`@/drizzle/migrations` は、適用できない壊れた SQL（`CREATE TABL broken (a);`）だけを含むマイグレーション1件に差し替える（読み出しは止めない） | 子要素「child」を包んで描画（`await render`）し、失敗の表示を `findBy*` で待つ | 「データベースの準備に失敗しました」が出て、「child」は出ない。`app.migrate` のログは error の1行だけで、`err.type` が `'DrizzleError'`、`err.message` が `"Failed to run the query 'CREATE TABL broken (a);'"`（info・warn には出ない） | I4-11 |
+| T209 | このテストの中だけ、`@/lib/db` の `getDb` を `new Error('open failed')` を投げる実装に変える（呼ばれるたびに投げる。`afterEach` で元に戻し、ほかの項目は空の DB を受け取る）。`@/drizzle/migrations` は本物のまま | 子要素「child」を包んで描画（`await render`）し、失敗の表示を `findBy*` で待つ → 同じ要素で描画し直す（`rerender`） | `await render` は reject せず（落ちない）、「データベースの準備に失敗しました」が出て「child」は出ない。`app.migrate` のログは error の1行だけ（info・warn には出ない）で、`err` が `{ type: 'Error', message: 'open failed', stack: <投げた Error の stack と同じ文字列> }`。描画し直したあとも失敗の表示のままで、`getDb` の呼び出しは1回だけ（開き直さない）、error ログも1行のまま | I4-11 |
 
 ### 手順13 同期の受け口（中間）：`tests/integration/features/sleep-record/sleep-record.store.test.ts`・`use-sleep-record-sync.test.tsx`
 
@@ -799,7 +806,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | T163 | Android `notGranted`、DB にシード S | 一覧を開き、1行目をタップ | 「ヘルスコネクトと連携する」ボタン・「許可しなかった場合は、ヘルスコネクトの設定から許可してください」・設定を開くボタンと一緒に S の一覧が出て、タップで S の詳細が出る | I4-13 |
 | T164 | `ready`、DB 空、読み取りを保留（解くとシード S を返す） | 一覧を開く → 保留を解く | 保留中は「睡眠データを取り込んでいます」が出て「睡眠データがありません」は出ない。解くと S の一覧が出る | I4-16 |
 | T165 | 連携状態の取得を保留 | 一覧を開く | 「読み込み中」だけが出て、案内・空の表示は出ない | I4-16 |
-| T180 | iOS。`getRequestStatusForAuthorization` は `shouldRequest` を返す（起動時の同期の中の取得で `notRequested` になり、同期は走らない）。DB にシード S | `renderRouter` で一覧を開き、`findBy*` で待ったあとの表示を見る | 「ヘルスケアと連携する」ボタンと S の一覧が出て、「読み込み中」と「睡眠データがありません」は出ていない（初回の DB の読み取り中に「読み込み中」だけを出すことは、DB の読み取りが同期関数で保留にできず、RNTL 14 の `await render` が読み取りの完了まで待つため外から見られない。I4-16 の注記のとおり、テストでは確かめず impl レビューでコードを確かめる。連携状態の取得中の「読み込み中」は T165 で確かめる） | I4-16 |
+| T180 | iOS。`getRequestStatusForAuthorization` は `shouldRequest` を返す（起動時の同期の中の取得で `notRequested` になり、同期は走らない）。DB にシード S | `renderRouter` で一覧を開き、`findBy*` で待ったあとの表示を見る | 「ヘルスケアと連携する」ボタンと S の一覧が出て、「読み込み中」と「睡眠データがありません」は出ていない（一覧が「DB を読んでいる間」の表示の状態を持たないことは、DB の読み取りが同期関数で、RNTL 14 の `await render` が読み取りの完了まで待つため外から見られない。I4-16 の注記のとおり、テストでは確かめず impl レビューでコードを確かめる。連携状態の取得中の「読み込み中」は T165 で確かめる） | I4-16 |
 | T184 | 一覧が出たあと、2回目の連携状態の取得（`getRequestStatusForAuthorization`）を保留 | `background`→`active` にし、保留中の表示を見てから保留を解く | 保留中も T147 と同じ行が出たままで、「読み込み中」・案内は出ない | I4-16 |
 | T166 | DB にシード S。一覧が出たあと、読み取りを保留 | `background`→`active`／下に引く（2ケース） | どちらも保留の間、S の一覧が出たままで「読み込み中」が出ない（同期成功のあとの読み直しは better-sqlite3 で同期的に終わり、間を外から見られないため、このリストでは T174 の内容の更新で確かめ、読み直しの間に「読み込み中」を出さないことは impl レビューでコードを確かめる） | I4-16 |
 | T167 | `ready`、DB に睡眠あり、読み取りを保留 | 一覧を開く | 行が出たまま、上部に同期中の表示が出る | I4-17 |
@@ -817,7 +824,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | T173 | `ready` | 起動の URL を `/sleep/2026-11-25` にして描画 | 連携状態の取得と読み取りがそれぞれ1回 | I4-14 |
 | T185 | DB にシード S。起動時の同期の読み取りを保留し、モックは `2026-11-24` の睡眠だけを返す | `/sleep/2026-11-25` を開いて「23:14〜6:46」を確かめ、保留を解いて同期を終える | 表示が「この日の睡眠データはありません」に変わる | I4-15 |
 | T174 | DB にシード S。起動時の同期の読み取りを保留し、モックは同じ睡眠を起床 7:10 にしたサンプルを返す | `/sleep/2026-11-25` を開いて「23:14〜6:46」を確かめ、保留を解いて同期を終える | 表示が「23:14〜7:10」に変わる | I4-15 |
-| T175 | `ready`（取得のモックは即座に返す）、DB にシード S | `renderRouter` で `/sleep/2026-11-25` を開き、`findBy*` で待ったあとの表示を見る | S の詳細が出て、「読み込み中」と「この日の睡眠データはありません」は出ていない（初回の DB 読み取り中の「読み込み中」は、T180 と同じ理由でテストでは確かめず impl レビューでコードを確かめる） | I4-16 |
+| T175 | `ready`（取得のモックは即座に返す）、DB にシード S | `renderRouter` で `/sleep/2026-11-25` を開き、`findBy*` で待ったあとの表示を見る | S の詳細が出て、「読み込み中」と「この日の睡眠データはありません」は出ていない（詳細が「DB を読んでいる間」の表示の状態を持たないことは、T180 と同じ理由でテストでは確かめず impl レビューでコードを確かめる） | I4-16 |
 
 ### 手順16 E2E（Maestro）：`tests/e2e/`
 
@@ -842,6 +849,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - 2026-11-26 test 合格（再レビュー：手順14 の前提・T180・T175・I4-16、3.3 の偽装タイマーの記述。1ラウンド。P1 2件・P2 5件を修正後、再レビューせず人間の判断で合格。P2 1件（T180 と T163 の重なり）は対応せず。TODO：一覧・詳細の初回の DB 読み取り中に「読み込み中」だけを出すことと、読み直しの間に「読み込み中」を出さないことを impl レビューでコードを確かめる）
 - 2026-11-26 plan・test 合格（再レビュー：手順16 の E2E とシードアプリの設計、T176〜T179。2ラウンド。plan は P1 4→3件・P2 7→6件、test は P1 2→0件・P2 5→6件。2ラウンド目の plan の P1 3件と P2 の多くを修正後、再レビューせず人間の判断で合格。要確認として残したもの：要件「読み取りのみ」の解釈を docs/requirement.md にも書くか、testing.md の E2E の実行コマンドをタグ付きにそろえるか）
 - 2026-11-26 plan・test 合格（impl レビュー1ラウンド目の P1 2件（実行の順序で落ちるテスト＝共通ログの Error 判定、Android の長さ0のステージだけの睡眠の取り込み）と P2 2件（同期中の印、許可の要求中の印）を直すための変更。T197〜T208。2ラウンド。plan は P1 4→2件・P2 5→5件、test は P1 5→5件・P2 6→7件。2ラウンド目の指摘をすべて修正後、再レビューせず人間の判断で合格）
+- 2026-11-26 plan・test 合格（impl レビュー2ラウンド目の P1 2件（Android のバックアップ、DB を開けないとき）を直すための変更。T209。plan は2ラウンド（P1 1→2件・P2 6→6件）、test は1ラウンド（P1 0件・P2 4件、修正済み）。plan の2ラウンド目の指摘を修正後、再レビューせず人間の判断で合格）
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
