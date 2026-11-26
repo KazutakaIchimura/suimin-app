@@ -220,7 +220,7 @@
 | `src/features/sleep-record/sleep-record-sync-provider.tsx` | 受け口 | `use-sleep-record-sync` を1回だけ動かすコンポーネント。`src/app/_layout.tsx` が子要素を包んで描画する。起動時の同期は睡眠記録の業務なので `src/lib/` ではなく機能フォルダに置き、`src/app/` は画面コンポーネントと同じく描画するだけにする |
 | `src/features/sleep-record/use-sleep-record-list.ts` | 受け口 | store の連携状態と DB の睡眠から、案内・日ごとの要約一覧を画面用の状態にする。表示用の整形（整形サービス。「今年」の判定に使う現在日は `@/lib/clock` から渡す）もここで呼び、画面には整形済みの文字列を渡す。版番号が変わったら読み直す。`Platform.OS` を読み、`requestId` を作ってサービスに渡す |
 | `src/features/sleep-record/use-sleep-record-detail.ts` | 受け口 | 日付パラメータを検証（日付の検証サービス）し、指定日の詳細を整形済みの画面用の状態にする。版番号が変わったら読み直す。`requestId` を作ってサービスに渡す |
-| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ）・下に引いて更新 |
+| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
 | `src/features/sleep-record/sleep-record-detail-screen.tsx` | 受け口 | 詳細画面。主睡眠・ステージ内訳・昼寝の一覧・日付不正／データなし／読み取りエラーの表示 |
 | `src/features/sleep-record/sleep-record-access-guide.tsx` | 受け口 | 連携状態に応じた案内文とボタン。一覧画面の部品で、表示する案内と押したときの操作を props で受け取る（サービス・store を直接呼ばない） |
 
@@ -244,6 +244,28 @@
 | `src/app/_layout.tsx` | `MigrationGate` の中に `SleepRecordSyncProvider`、その中に `Stack` を入れて描画するだけ（処理は書かない） |
 | `src/app/index.tsx` | `SleepRecordListScreen` を描画するだけにする |
 | `src/app/sleep/[date].tsx` | `date` パラメータを渡して `SleepRecordDetailScreen` を描画するだけ |
+
+#### E2E（`tests/e2e/`。Maestro のフローと、シードを入れる開発用アプリ）
+Maestro にはパソコン側でコマンド（adb など）を実行する命令がなく、このアプリはヘルスケアへ書き込めない（要件「読み取りのみ」）。そのため、ヘルスコネクトへシードを入れる**別の開発用アプリ**（シードアプリ）を作り、フローからそのアプリを操作してシードを入れ替える。シードアプリはテストの道具で、配布しない。本体のアプリは書き込みの許可を持たないまま、読み取り専用を保つ（要件「ヘルスケアからは読み取りのみ」は本体のアプリの要件と解釈する。2026-11-26 に人間が判断し、本体と別のアプリにすることを選んだ）。
+
+| パス | 内容 |
+| --- | --- |
+| `tests/e2e/seed/sleep-seed.js` | シードの定義（「睡眠なし」「数日分」「14日分」）。日付は実行日から逆算した相対日で持ち、`buildSeed(名前, 現在時刻)` で睡眠とステージ区間の絶対時刻を返す。`expectedLatest(名前, 現在時刻)` で、最新日の日付・合計睡眠時間・就寝〜起床・睡眠時間の表示文字列（3.4 の形）を返す。日付と時刻はどちらも日本時間（+09:00）で計算し、動かす機械のタイムゾーンに左右されないようにする（Maestro の `runScript` はパソコン側で、シードアプリはエミュレータで動くため）。シードアプリと Maestro の `runScript` の両方から使うため、import を使わない素の JavaScript にする（`module` があるときだけ `module.exports` する）。Maestro から使うときは、環境変数 `SEED` で名前を受け、`output.latestDate`・`output.latestTotal`・`output.latestTime`・`output.latestMainTotal` に文字列を入れる。「14日分」は今回のフローでは使わず、スマートアラームの推定（testing.md の「推定に足りる日数」）のために置いておく。日付の文字列は 3.4 のとおり、今年（日本時間の現在日の年）以外なら年を付ける。表示文字列の作り方はアプリの整形サービスを使わず、このファイルに書く（E2E でアプリ内部を使わないため） |
+| `tests/e2e/seed/seeder-app/` | シードアプリ（Android だけ。別の Expo プロジェクトで、`package.json`・`app.json`・`tsconfig.json`・`metro.config.js` を持つ。パッケージ名は `dev.suimin.e2eseeder`）。`../sleep-seed.js` はフォルダの外にあるため、`metro.config.js` の `watchFolders` に `tests/e2e/seed/` を入れて読む。依存は `tests/e2e/seed/seeder-app/` で `npm install` して入れる。`app.json` には本体と同じく `react-native-health-connect` と `expo-build-properties`（compileSdk 36 など。3.3「設定・依存」と同じ値）のプラグインを入れる。ビルドは JS を同梱する preview の APK にする（開発ビルドどうしだと、どちらも Metro の同じポートにつなぎに行き、本体の `npx expo start` と同時に動かせないため）。そのため `tests/e2e/seed/seeder-app/eas.json` に `preview` プロファイル（`android.buildType: apk`）を置き、`eas build --profile preview --platform android` で作る。権限は `android.permission.health.WRITE_SLEEP` だけ。画面に「睡眠なし」「数日分」「14日分」のボタンがあり、押すと書き込みの許可を確かめ（なければ要求し）、このアプリが書いた SleepSession を直近60日ぶん消して（`deleteRecordsByTimeRange`。ヘルスコネクトは書いたアプリのデータしか消せない）、そのシードを `insertRecords` で入れる。終わったら「投入完了：<名前>」、失敗したら「投入失敗」を出す。ログ・画面に睡眠の時刻は出さない |
+| `tests/e2e/seed/README.md` | 実行前の準備（シードアプリと本体の開発ビルドをエミュレータに入れる・エミュレータの言語を日本語、タイムゾーンを Asia/Tokyo にする・エミュレータに他のアプリの睡眠データを入れない）、実行のコマンド、0時（日本時間）をまたぐ時間帯に実行しないこと、エミュレータとパソコンの時計をそろえること（シードアプリと `runScript` がそれぞれの現在時刻から日付を逆算するため）、許可の取り消し・付け直しの方法（下の確認の結果）、iOS が未対応であること。各フローは前のフローの結果に左右されず、実行の順序は問わない |
+| `tests/e2e/subflows/seed.yaml` | シードアプリを起動して、環境変数 `SEED` のボタンを押し、「投入完了：<名前>」を待つ |
+| `tests/e2e/subflows/reset-app.yaml` | 本体を `launchApp`（`clearState: true`）で起動し直してデータ（DB）を消し、環境変数 `READ_SLEEP`（`allow`／`deny`）で睡眠の読み取りの許可を設定する |
+| `tests/e2e/subflows/restore.yaml` | 後始末。シードを「数日分」に戻し、本体の睡眠の読み取りを許可に戻す |
+| `tests/e2e/sleep-flow.yaml`・`deny-android.yaml`・`deny-ios.yaml`・`no-data.yaml` | E1〜E3 のフロー（テストリストの T176〜T179）。Android 用には `tags: [android]`、iOS 用（`deny-ios.yaml`）には `tags: [ios]` を付け、`maestro test --include-tags=android tests/e2e` で Android 用だけを走らせる（部品フローは `tests/e2e/subflows/` に置き、フォルダ直下のフローとしては走らない）。iOS 用は E2 の `deny-ios.yaml` だけを書き、E1・E3 の iOS 用はシミュレータへの投入方法が決まってから書く。表示を待つときは固定時間で待たず、`extendedWaitUntil` で条件が満たされるまで待つ |
+| `app.json`（手順16で変更） | Maestro の `appId` に使うため、`android.package` と `ios.bundleIdentifier` を `dev.suimin.app` で追加する |
+| `tsconfig.json`・`eslint.config.js`・`jest.config.js`・`metro.config.js`（手順16で変更） | 本体の型チェック・リント・Jest・Metro の対象から `tests/e2e/seed/seeder-app/` を外す（別の Expo プロジェクトで、依存も設定も別のため。`tsconfig.json` の `exclude`、ESLint の `ignores`、Jest の `modulePathIgnorePatterns`、Metro の `resolver.blockList`）。シードアプリはそのフォルダで `npx tsc --noEmit`・`npx expo lint` を走らせる |
+
+- 最初の実行で確かめること（結果は `tests/e2e/seed/README.md` に書く）
+  - `launchApp` の `permissions`（または `setPermissions`）に `android.permission.health.READ_SLEEP` を指定して効くか。効かなければ、ヘルスコネクトの設定画面を Maestro で操作して切り替える部品フローに置き換える
+  - `clearState: true` でヘルスコネクトの許可が消えるか残るか
+  - T177 で「許可しない」を繰り返したとき（3.1 の「2回拒否すると OS の許可画面が出なくなる」）、`reset-app.yaml` で拒否の回数が戻るか。戻らなければ、実行の前にパソコン側で許可の印を消す手順（`adb shell pm clear-permission-flags` など）を README に書き、`maestro test` を1回実行する前に1度だけ流す（Maestro はパソコン側のコマンドを実行できないため、フローの中には入れない。T177 の拒否は1回の実行で1回だけなので、実行の前の1度で足りる）
+- シードアプリは単体・中間テストの対象にしない（テストの道具であり、正しく入れられたかは E1 で `sleep-seed.js` から算出した文字列と一致することで分かる）。型チェックとリントは本体と同じく通す
+- iOS：シードアプリは Android だけ。iOS のフローは `deny-ios.yaml` だけを書き、シミュレータのヘルスケアへの投入方法と許可の取り消し方法が決まるまで実行しない（それまでは PR 本文に「iOS の E2E は未実行」と書く）
 
 ### 3.4 表示の仕様
 - 時間は「7時間32分」「45分」「0分」（1時間以上なら分が0でも「1時間0分」）、時刻は「23:14」「0:05」（24時間表記、時は0埋めなし、分は2桁。端末のタイムゾーン）、日付は「11月25日（水）」で表示する。今年（端末の現在日の年）以外の日付は「2025年11月25日（火）」と年を付ける（履歴が1年を超えても見分けられるようにする）
@@ -413,9 +435,9 @@
 - E1 許可して表示：未連携で起動 → 「連携する」→ OS の許可画面で許可 → シードの睡眠が一覧に出る → 行をタップして詳細が出る
 - E2 拒否したときの案内：Android で許可しない → 設定を開く案内が出る。iOS で許可しない → 許可の確認手順つきの案内が出る
 - E3 睡眠なし：シード「睡眠実績がない状態」で、睡眠なしの案内が出る
-- シードは `tests/e2e/seed/` に1つの定義ファイルで置く（睡眠なし・数日分・14日分）。日付は固定せず、実行日から逆算した相対日（例：実行日の1〜14日前）で定義する（ヘルスコネクトは許可の30日前より古いデータを読めないため）。エミュレータのヘルスコネクト／シミュレータのヘルスケアへの投入手順も同じ場所に書く
+- シードは `tests/e2e/seed/sleep-seed.js` に1つの定義ファイルで置く（睡眠なし・数日分・14日分）。日付は固定せず、実行日から逆算した相対日（例：実行日の1〜14日前）で定義する（ヘルスコネクトは許可の30日前より古いデータを読めないため）。エミュレータのヘルスコネクトへは、シードアプリ（3.3「E2E」）を Maestro から操作して入れる。投入の手順・シミュレータのヘルスケアが未対応であることは `tests/e2e/seed/README.md` に書く
 - iOS の E2E：Mac がなく、iOS シミュレータでのヘルスケアのシード投入・許可の取り消しをこのプロジェクトではまだ行えない。iOS のフローも書いておくが、実行は iOS を確かめられる環境（EAS のクラウド実行や実機）が決まってからとし、それまでは PR 本文に「iOS の E2E は未実行」と書く。Android の E2E はエミュレータで実行する
-- 準備と後始末：各フローの冒頭で `launchApp`（`clearState: true`）によりアプリのデータ（DB）を消す。「未連携」の前提が要るフロー（E1・E2）は、冒頭で許可を取り消す。E3 は冒頭で端末のヘルスケアの睡眠データを「睡眠なし」のシードにする。取り消し・投入の手順（OS ごとのコマンド・操作）はシードの手順と同じ場所に書く。後始末（変更した許可を元に戻し、ヘルスケアの睡眠データを既定のシード（数日分）に入れ直す）は、フローが途中で失敗しても走るように Maestro の `onFlowComplete` に置く。準備も `onFlowStart` に置き、前のフローの結果に左右されないようにする
+- 準備と後始末：各フローの `onFlowStart` で、シードアプリでその回のシードを入れ（部品フロー `seed.yaml`）、本体のデータ（DB）を消して睡眠の読み取りの許可を設定する（`reset-app.yaml`。「未連携」の前提が要る E1・E2 は `deny`、E3 は `allow`）。後始末（シードを「数日分」に戻し、許可を `allow` に戻す。`restore.yaml`）は、フローが途中で失敗しても走るように `onFlowComplete` に置く。準備も `onFlowStart` に置き、前のフローの結果に左右されないようにする
 
 ### テストの対象外
 - 認可（他人のデータを見られないこと）：アカウントがなく、データは端末内の本人のものだけなので該当しない
@@ -440,14 +462,19 @@
 13. 同期の受け口（画面なし。store は直接、フックは `renderHook` で確かめる）：I4-5・I4-6・I4-6c・I4-6d・I4-6e・I4-7・I4-12・I4-12b → `sleep-record.store.ts`・`use-sleep-record-sync.ts`・`sleep-record-sync-provider.tsx`
 14. 一覧と案内：I4-1（詳細へ移ることの確認は、手順15で詳細のルートを作ってから足す）・I4-11b・I4-13b・I4-2・I4-2b・I4-3・I4-4・I4-6b・I4-8・I4-9・I4-13・I4-16・I4-17 → `sleep-record-access-guide.tsx`・`use-sleep-record-list.ts`・`sleep-record-list-screen.tsx`・`src/app/index.tsx`・`src/app/_layout.tsx`
 15. 詳細：I4-9b・I4-10・I4-14・I4-15 → `use-sleep-record-detail.ts`・`sleep-record-detail-screen.tsx`・`src/app/sleep/[date].tsx`
-16. E2E：シード定義と E1〜E3 のフローを書く（実行はエミュレータ・実機のある環境で行う）
+16. E2E（実行はエミュレータのある環境で行う。コンテナ内では型チェックとリントまで）。各段階で本体の `npm test`・`npm run lint`・`npx tsc --noEmit` が通ることを確かめる
+    - 16a 本体の設定：`app.json`（`android.package`・`ios.bundleIdentifier`）、`tsconfig.json`・`eslint.config.js`・`jest.config.js`・`metro.config.js`（シードアプリを外す）
+    - 16b シード定義：`tests/e2e/seed/sleep-seed.js`
+    - 16c シードアプリ：`tests/e2e/seed/seeder-app/`（そのフォルダで型チェック・リント）
+    - 16d フロー：部品フロー・E1〜E3 のフロー・`tests/e2e/seed/README.md`
 
 ## 7. コミット前テスト実行
 - `npm test`（単体・中間）
 - `npm run lint`
 - `npx tsc --noEmit`
 - `npx drizzle-kit generate` を実行して、`drizzle/` に差分が出ないこと（テーブル定義とマイグレーションのずれがないこと）
-- E2E（`maestro test tests/e2e`）は、開発ビルドを入れたエミュレータ・実機で、マージ前に実行できる環境があれば実行する。実行できなかった場合は PR 本文にその旨を書く
+- シードアプリ：`tests/e2e/seed/seeder-app/` で `npx tsc --noEmit`・`npx expo lint`
+- E2E（`maestro test --include-tags=android tests/e2e`）は、開発ビルドを入れたエミュレータ・実機で、マージ前に実行できる環境があれば実行する。実行できなかった場合は PR 本文にその旨を書く
 
 ## 8. スコープ外
 - 週・月のグラフ（02 で別に設計する）
@@ -780,10 +807,10 @@
 
 | ID | 前提 | 操作 | 期待結果 | 対応 |
 | --- | --- | --- | --- | --- |
-| T176 | Android で実行（iOS は環境が決まってから）。`onFlowStart`：`clearState`、許可を取り消し、シード「数日分」 | 起動 → 「連携する」→ OS の許可画面で許可 | シード定義から算出した最新日の日付・合計睡眠時間・就寝〜起床の文字列が1行目に出て、タップすると同じ日の就寝〜起床・睡眠時間の文字列が詳細に出る（`sleep-flow.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E1 |
-| T177 | 同上（Android） | 「連携する」→ 許可しない | 「許可しなかった場合は、ヘルスコネクトの設定から許可してください」と設定を開くボタン（`deny-android.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E2 |
-| T178 | 同上（iOS。実行は環境が決まってから） | 「連携する」→ 許可しない | 許可の確認手順つきの「睡眠データがありません。…」（`deny-ios.yaml`）。`onFlowComplete` で許可とシードを既定に戻す | E2 |
-| T179 | Android で実行（iOS は環境が決まってから）。`onFlowStart`：`launchApp`（`clearState: true`）で DB を消し、シード「睡眠なし」に入れ替え、睡眠の読み取りを許可する（`clearState` で許可が消えるかを最初に確かめ、付け直す手順を `tests/e2e/seed/` に書く） | 起動 | 「睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください」（`no-data.yaml`）。iOS のフローでは「睡眠データがありません。許可していない場合は、設定 → ヘルスケア → データアクセスとデバイス → suimin-app で睡眠を許可してください。SOXAI アプリのヘルスケア連携も確認してください」。`onFlowComplete` でシードを「数日分」に戻す | E3 |
+| T176 | Android で実行。`onFlowStart`：`seed.yaml`（`SEED=数日分`）→ `reset-app.yaml`（`READ_SLEEP=deny`）。`onFlowComplete`：`restore.yaml` | 起動 → 「ヘルスコネクトと連携する」→ OS の許可画面で許可 | 押す前は「許可しなかった場合は、ヘルスコネクトの設定から許可してください」が出ている。許可のあと、`runScript` で `sleep-seed.js`（`SEED=数日分`）から求めた `output.latestDate`・`output.latestTotal`・`output.latestTime` の文字列が1行目に出るまで `extendedWaitUntil` で待ち、その案内と「ヘルスコネクトと連携する」ボタンは消えている。1行目（`testID` `sleep-record-row` の1件目）をタップすると、詳細に `output.latestTime`・`output.latestMainTotal` が出る（`sleep-flow.yaml`）。確かめるのは最新日だけで、ほかの日の行とステージの内訳は中間テスト（T147・T168）で確かめる。前提：エミュレータは日本語・Asia/Tokyo で、他のアプリの睡眠データがなく、0時（日本時間）をまたいで実行しない | E1 |
+| T177 | T176 と同じ準備・後始末・前提（Android）。`runScript`（`SEED=数日分`）で `output.latestDate` を求めておく | 「ヘルスコネクトと連携する」→ 許可しない | 「許可しなかった場合は、ヘルスコネクトの設定から許可してください」と「設定を開く」ボタンが出るまで `extendedWaitUntil` で待ち、「ヘルスコネクトと連携する」ボタンが残っていて、「連携の要求に失敗しました」は出ていない。そのあとで、シードの最新日（`output.latestDate`）の行が出ていないこと（同期していない）を確かめる（`deny-android.yaml`） | E2 |
+| T178 | iOS（シミュレータのヘルスケアへの投入方法が決まるまで実行しない）。`tags: [ios]`。準備（アプリのデータの消去と、HealthKit の許可を「未要求」に戻す方法）と後始末は、iOS の実行環境が決まるときに決める（それまでは `onFlowStart`・`onFlowComplete` を置かず、フロー本体だけを書く） | 「ヘルスケアと連携する」→ 許可しない | 許可の確認手順つきの「睡眠データがありません。許可していない場合は、設定 → ヘルスケア → データアクセスとデバイス → suimin-app で睡眠を許可してください。SOXAI アプリのヘルスケア連携も確認してください」が出るまで `extendedWaitUntil` で待ち（拒否は判別できず `ready` になり、同期で0件になってからこの案内が出る）、「ヘルスケアと連携する」ボタンは消えていて、一覧の行（`sleep-record-row`）は1つもない（`deny-ios.yaml`） | E2 |
+| T179 | Android で実行。`onFlowStart`：`seed.yaml`（`SEED=睡眠なし`）→ `reset-app.yaml`（`READ_SLEEP=allow`）。`onFlowComplete`：`restore.yaml` | 起動 | 「睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください」が出て（`extendedWaitUntil` で待つ）、一覧の行（`testID` `sleep-record-row`）は1つもない（`no-data.yaml`）。前提：エミュレータに他のアプリの睡眠データがない（シードアプリは自分が書いたデータしか消せないため）。iOS の同じ確かめは、投入方法が決まってから足す | E3 |
 
 ### このリストで扱った・扱わなかった持ち越し事項（plan 9ラウンド目の P2）
 - テスト番号の並び：リストは実装順に並べ、通し番号 `T001`〜で振った（5 の番号は「対応」に残す）
@@ -797,6 +824,7 @@
 - 2026-11-26 test 合格（5ラウンド。5ラウンド目の P1 2件・P2 12件を修正後、再レビューせず人間の判断で合格。TODO：詳細画面の日付見出し・案内、`start_at` のインデックス、版番号の更新後の読み直し中に「読み込み中」が出ないことの確認方法（T166））
 - 2026-11-26 test 合格（再レビュー：手順12 T130・T131 と T149、3.3 の `@/drizzle/migrations` の差し替え。1ラウンド。P1 3件・P2 3件を修正後、再レビューせず人間の判断で合格）
 - 2026-11-26 test 合格（再レビュー：手順14 の前提・T180・T175・I4-16、3.3 の偽装タイマーの記述。1ラウンド。P1 2件・P2 5件を修正後、再レビューせず人間の判断で合格。P2 1件（T180 と T163 の重なり）は対応せず。TODO：一覧・詳細の初回の DB 読み取り中に「読み込み中」だけを出すことと、読み直しの間に「読み込み中」を出さないことを impl レビューでコードを確かめる）
+- 2026-11-26 plan・test 合格（再レビュー：手順16 の E2E とシードアプリの設計、T176〜T179。2ラウンド。plan は P1 4→3件・P2 7→6件、test は P1 2→0件・P2 5→6件。2ラウンド目の plan の P1 3件と P2 の多くを修正後、再レビューせず人間の判断で合格。要確認として残したもの：要件「読み取りのみ」の解釈を docs/requirement.md にも書くか、testing.md の E2E の実行コマンドをタグ付きにそろえるか）
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
