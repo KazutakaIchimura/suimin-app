@@ -1,0 +1,34 @@
+# E2 拒否したときの案内・Android（テストリスト T177）
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 数日分
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: deny
+onFlowComplete:
+  - runFlow: subflows/restore.yaml
+---
+- runScript:
+    file: seed/sleep-seed.js
+    env:
+      SEED: 数日分
+- extendedWaitUntil:
+    visible: ヘルスコネクトと連携する
+    timeout: 30000
+- tapOn: ヘルスコネクトと連携する
+# OS（ヘルスコネクト）の許可画面で許可しない
+- tapOn: 許可しない
+- extendedWaitUntil:
+    visible: 許可しなかった場合は、ヘルスコネクトの設定から許可してください
+    timeout: 30000
+- assertVisible: 設定を開く
+- assertVisible: ヘルスコネクトと連携する
+- assertNotVisible: 連携の要求に失敗しました
+# 同期していない（シードの最新日の行が出ない）
+- assertNotVisible: ${output.latestDate}

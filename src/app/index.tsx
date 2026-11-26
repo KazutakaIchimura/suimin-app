@@ -1,17 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { SleepRecordListScreen } from '@/features/sleep-record/sleep-record-list-screen';
 
 export default function HomeRoute() {
-  return (
-    <View style={styles.container}>
-      <Text>suimin-app</Text>
-    </View>
-  );
+  return <SleepRecordListScreen />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

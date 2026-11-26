@@ -1,0 +1,21 @@
+# E3 睡眠なし（テストリスト T179）。エミュレータに他のアプリの睡眠データがないことが前提
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 睡眠なし
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: allow
+onFlowComplete:
+  - runFlow: subflows/restore.yaml
+---
+- extendedWaitUntil:
+    visible: 睡眠データがありません。SOXAI アプリのヘルスコネクト連携を確認してください
+    timeout: 60000
+- assertNotVisible:
+    id: sleep-record-row

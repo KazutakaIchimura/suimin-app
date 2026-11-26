@@ -7,7 +7,8 @@ module.exports = defineConfig([
   expoConfig,
   prettierConfig,
   {
-    ignores: ['dist/*', 'drizzle/*', '.expo/*'],
+    // E2E のシードアプリは別の Expo プロジェクトなので、そのフォルダでリントする
+    ignores: ['dist/*', 'drizzle/*', '.expo/*', 'tests/e2e/seed/seeder-app/**'],
   },
   {
     // ログは src/lib/logger.ts の共通ログ関数を経由する（.claude/rules/logging.md）
