@@ -184,7 +184,7 @@
 | `app.json` | `plugins` に次を追加する。`@kingstinct/react-native-healthkit`（`NSHealthShareUsageDescription` に日本語の説明、`NSHealthUpdateUsageDescription: false`、`background: false`）、`react-native-health-connect`、`expo-build-properties`（`android.compileSdkVersion: 36`・`targetSdkVersion: 36`・`minSdkVersion: 26`。`react-native-health-connect` v4 の README の Expo 設定例どおり）。`android.permissions` に `android.permission.health.READ_SLEEP` を追加する。Expo 構成では `MainActivity` の変更は要らない（同梱の Expo モジュールが許可結果の受け取りを登録する） |
 | `tsconfig.json`・`jest.config.js` | パス別名 `@/drizzle/*` → `drizzle/*` を、既存の `@/*` → `src/*` より優先して解決されるように追加する（`src/lib/migration-gate.tsx` が `drizzle/migrations.js` を `@/` から始まるパスで import するため。architecture.md の「import は `@/` から始める」に合わせる） |
 | `jest.config.js`・`tests/setup/global-setup.js` | `globalSetup` で `process.env.TZ = 'Asia/Tokyo'` にし、日付の扱いをテスト環境で固定する（`npm test` 以外で jest を起動しても効くように、スクリプトではなく設定で行う） |
-| `package.json` | 開発用に `better-sqlite3`・`@types/better-sqlite3` を追加（`npx expo install better-sqlite3 @types/better-sqlite3 -- --save-dev`）。`better-sqlite3` のインストール時スクリプトを `npm install-scripts approve` で許可する |
+| `package.json` | 開発用に `better-sqlite3`・`@types/better-sqlite3` を追加（`npx expo install better-sqlite3 @types/better-sqlite3 -- --save-dev`）。`better-sqlite3` のインストール時スクリプト（ソースからのビルド）は `npm install-scripts deny` で実行しない（開発コンテナの Python ではビルドが失敗するため。パッケージに同梱のビルド済みバイナリ `prebuilds/linux-x64.node` を使う） |
 | `drizzle/` | `npx drizzle-kit generate` で生成 |
 
 #### 共通（`src/lib/`）
@@ -229,12 +229,14 @@
   - ネイティブライブラリ（`@kingstinct/react-native-healthkit`・`react-native-health-connect`）→ テスト用の実装
   - `@/lib/db` → better-sqlite3 に実際のマイグレーションを適用した DB（中身は本物の SQL）
   - `react-native` の `Platform.OS`・`AppState`（OS の切り替え・前面復帰の再現。読むのはフックと store だけ）
-  - `@/drizzle/migrations` → 適用できない壊れた SQL を含むマイグレーション（I4-11 でマイグレーションの失敗を起こすときだけ。DB への入力データの差し替えであり、アプリのロジックは差し替えない）
+  - `@/drizzle/migrations` → I4-11 だけで、次の2通りに差し替える。どちらも DB への入力データの差し替えであり、アプリのロジックは差し替えない
+    - 適用できない壊れた SQL を含むマイグレーション（失敗を起こすとき）
+    - 中身は本物のマイグレーションのまま、マイグレーション一覧（`journal.entries`）の読み出しをテストが解くまで止めておくもの（適用が終わる前の表示を見るとき。RNTL 14 の `render` は非同期で、`await render(...)` が画面の更新が落ち着くまで待つため、止めないと描画が返った時点で適用が済んでいる）
 - I4 では `jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] })` と `jest.setSystemTime()` で現在時刻を固定する（`@/lib/clock` は実時計を返すため、取り込み範囲とシードの起床時刻が実行日で変わらないようにする。Promise と RNTL の `waitFor`・`findBy*` が止まらないよう、`Date` とタイマー以外は偽装しない）
 - 「同期サービスが何回呼ばれたか」「同期中」は、アプリ内のサービスを差し替えずに確かめる。I4-13b の `requestId` だけは、中身を差し替えない `jest.spyOn`（本物の処理をそのまま動かし、渡った引数を見るだけ）で、連携状態の窓口と同期サービスに渡る値を確かめる。回数はネイティブライブラリの読み取り関数（`queryCategorySamples`・`readRecords`）が呼ばれた回数で数え、同期中の状態はそのモックが返す Promise を保留にして作る
 - 画面遷移と起動時の URL は `expo-router/testing-library` の `renderRouter` で、実際の `src/app/` のルートを読み込んで確かめる
 - DB の読み取り失敗は、テスト用DB（一時ファイルの SQLite）を閉じて起こし、再試行の前に同じファイルを開き直す。DB リポジトリは呼び出しのたびに `@/lib/db` から DB を取得する（保持し続けない）ので、開き直した DB が使われる
-- `drizzle-orm/expo-sqlite/migrator` の `useMigrations` が better-sqlite3 の DB で動くかは、手順12の最初に確かめる。動かなければ作業を止めて、I4-11 の確かめ方を相談する
+- `drizzle-orm/expo-sqlite/migrator` の `useMigrations` が better-sqlite3 の DB で動くかは、手順12の最初に確かめる。動かなければ作業を止めて、I4-11 の確かめ方を相談する（2026-11-26 に確かめ、動いた）
 
 #### 画面ルート（`src/app/`）
 | パス | 内容 |
@@ -417,7 +419,7 @@
 
 ### テストの対象外
 - 認可（他人のデータを見られないこと）：アカウントがなく、データは端末内の本人のものだけなので該当しない
-- `src/lib/db.ts`：`expo-sqlite` のネイティブモジュールに依存し、コンテナ内では動かせない。外部キーの効き方（PRAGMA）は、同じ PRAGMA を実行するテスト用DBで I1-4・I1-5 として確かめる
+- `src/lib/db.ts`：`expo-sqlite` のネイティブモジュールに依存し、コンテナ内では動かせない。テスト用DBの better-sqlite3 は外部キーが既定で有効（`SQLITE_DEFAULT_FOREIGN_KEYS=1`）なので、`db.ts` の `PRAGMA foreign_keys = ON` の有無はコンテナ内では確かめられない（I1-4・I1-5 で確かめるのは制約の定義だけ）。`expo-sqlite` は既定で無効なため、実機では E2E で睡眠が入れ替わるときに確かめる
 - `src/lib/request-id.ts`・`src/lib/clock.ts`：判定や計算を持たない薄い包み（乱数・現在時刻を返すだけ）のため、単体テストを書かない。使う側のテストでは引数で差し替える
 
 ## 6. 実装順
@@ -525,7 +527,7 @@
 | T028 | 同じ睡眠で `deep` 0:00–2:00 と `rem` 1:00–3:00／`rem` 0:00–2:00 と `light` 1:00–3:00 | それぞれ組み立てる | 前者は `deep` 0:00–2:00・`rem` 2:00–3:00、後者は `rem` 0:00–2:00・`light` 2:00–3:00。どちらも睡眠時間 180分 | U1-4 |
 | T029 | 同じ睡眠で `light` 0:00–2:00 と `awake` 1:00–3:00／`unspecified` 0:00–2:00 と `awake` 1:00–3:00 | それぞれ組み立てる | 前者は `light` 0:00–2:00・`awake` 2:00–3:00 で睡眠時間 120分。後者は `unspecified` 0:00–1:00・`awake` 1:00–3:00 で睡眠時間 60分（`awake` が `unspecified` より優先） | U1-4b |
 | T030 | 同じ睡眠で `deep` 0:00–3:00 と、それに完全に含まれる `unspecified` 1:00–2:00 | 組み立てる | 区間は `deep` 0:00–3:00 の1件だけ（長さ0の区間がない） | U1-4c |
-| T031 | 同じ睡眠で `light` 0:00–1:00 と `light` 1:00–2:00（隣接）、および `light` 0:00–1:00・`deep` 0:30–0:40・`light` 0:40–2:00 | それぞれ組み立てる | 前者は `light` 0:00–2:00 の1件。後者は `light` 0:00–0:30・`deep` 0:30–0:40・`light` 0:40–2:00 の3件（同じステージでも隣接しないものはつながない） | U1-4c |
+| T031 | 同じ睡眠で `light` 0:00–1:00 と `light` 1:00–2:00（隣接）、および `light` 0:00–1:00・`deep` 0:30–0:40・`light` 0:40–2:00 | それぞれ組み立てる | 前者は `light` 0:00–2:00 の1件。後者は `light` 0:00–0:30・`deep` 0:30–0:40・`light` 0:40–2:00 の3件（同じステージでも隣接しないものはつながない）。iOS で `light` 0:00–1:00 と `light` 1:10–2:00（空き10分）をまとめた睡眠は、区間が2件のままで睡眠時間 110分（空きを挟んでつながない） | U1-4c |
 | T032 | `light` が 7時間32分59秒、`awake` が 30分 | 組み立てる | 睡眠時間 452分 | U1-5 |
 | T193 | 1つの睡眠に `awake` 23:00–23:20、`light` 23:20–6:00、`awake` 6:00–6:10 | 組み立てる | 就寝 23:00・起床 6:10（覚醒のセグメントも範囲に入る）、睡眠時間 400分 | U1-5 |
 | T033 | `awake` だけの睡眠／`light` 59秒＋`awake` 1時間／`light` ちょうど60秒＋`awake` 1時間 | それぞれ組み立てる | 1つ目・2つ目は睡眠0件。3つ目は睡眠1件で睡眠時間 1分 | U1-6 |
@@ -554,7 +556,7 @@
 
 | ID | 前提 | 操作 | 期待結果 | 対応 |
 | --- | --- | --- | --- | --- |
-| T051 | 帰属日 `2026-11-25` に、就寝 `15:00` の 30分、就寝 `2026-11-24T23:00` の 420分、就寝 `12:00` の 60分を、この順で渡す | 1日の詳細を作る | 主睡眠は 420分、昼寝は 12:00 の 60分・15:00 の 30分の順 | U2-1 |
+| T051 | 帰属日 `2026-11-25` に、就寝 `15:00` の 30分、就寝 `2026-11-24T23:00` の 420分、就寝 `12:00` の 60分を、この順で渡す | 1日の詳細を作る | 主睡眠は 420分、昼寝は 12:00 の 60分・15:00 の 30分の順。昼寝を 12:00 の 30分・15:00 の 60分に変えても、昼寝は 12:00・15:00 の順（睡眠時間の順ではない） | U2-1 |
 | T052 | 帰属日 `2026-11-25` に 300分の睡眠2件（就寝 `2026-11-25T13:00` のものを先、`2026-11-24T22:00` のものを後に渡す） | 1日の詳細を作る | 主睡眠は就寝 `2026-11-24T22:00` のもの、昼寝は `2026-11-25T13:00` のもの | U2-1 |
 | T053 | T051 のデータ | 日ごとの要約一覧を作る | `2026-11-25` の合計睡眠時間 510分、昼寝の件数 2、主睡眠の就寝・起床が 420分の睡眠のもの | U2-2 |
 | T054 | 帰属日 `2026-11-23`・`2026-11-25`・`2026-11-24` の睡眠を、この順（未整列）で渡す | 日ごとの要約一覧を作る | `2026-11-25`・`2026-11-24`・`2026-11-23` の順の3行。睡眠のない `2026-11-22` などの行はない | U2-3（未整列） |
@@ -691,12 +693,12 @@
 
 ### 手順12 マイグレーションの適用（中間）：`tests/integration/lib/migration-gate.test.tsx`
 
-最初に `useMigrations` が better-sqlite3 の DB で動くかを確かめる（動かなければ止めて相談）。
+最初に `useMigrations` が better-sqlite3 の DB で動くかを確かめる（動かなければ止めて相談）。あわせて、T130 の読み出しを止める仕組みが効くか（解く前に `sleep_sessions` がない状態を観測できるか）も確かめ、効かなければ止めて相談する（drizzle の migrator がマイグレーション一覧を `for await` で読む作りに依存するため）。DB のテーブルの有無は、テストが持つ better-sqlite3 の接続で `sqlite_master` を直接読んで確かめる
 
 | ID | 前提 | 操作 | 期待結果 | 対応 |
 | --- | --- | --- | --- | --- |
-| T130 | 正しいマイグレーション。テスト用DBの補助を使わず、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す | 子要素「child」を包んで描画 | 適用が終わる前は「child」が出ず、待つと「child」が出る（失敗の表示は出ない）。描画後の DB に `sleep_sessions`・`sleep_stages`・`sleep_sync_state` がある | I4-11（対照） |
-| T131 | `@/drizzle/migrations` を壊れた SQL を含むものに差し替え | 同上 | 「データベースの準備に失敗しました」が出て「child」は出ない。`app.migrate` の error ログ（`err`） | I4-11 |
+| T130 | 正しいマイグレーション。テスト用DBの補助を使わず、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す。`@/drizzle/migrations` は中身が本物のまま、マイグレーション一覧の読み出しを止めたもの（3.3） | 子要素「child」を包んで描画（`await render`）→ 止めていた読み出しを解く | 解く前は「child」も「データベースの準備に失敗しました」も出ず、DB に `sleep_sessions` がない。解いて待つと「child」が出て（失敗の表示は出ない）、DB に `sleep_sessions`・`sleep_stages`・`sleep_sync_state` がある。`app.migrate` のログはどのレベルにも出ない | I4-11（対照） |
+| T131 | T130 と同じ、マイグレーションを適用していない空の better-sqlite3 DB を `@/lib/db` に渡す。`@/drizzle/migrations` は、適用できない壊れた SQL（`CREATE TABL broken (a);`）だけを含むマイグレーション1件に差し替える（読み出しは止めない） | 子要素「child」を包んで描画（`await render`）し、失敗の表示を `findBy*` で待つ | 「データベースの準備に失敗しました」が出て、「child」は出ない。`app.migrate` のログは error の1行だけで、`err.type` が `'DrizzleError'`、`err.message` が `"Failed to run the query 'CREATE TABL broken (a);'"`（info・warn には出ない） | I4-11 |
 
 ### 手順13 同期の受け口（中間）：`tests/integration/features/sleep-record/sleep-record.store.test.ts`・`use-sleep-record-sync.test.tsx`
 
@@ -736,7 +738,7 @@
 | --- | --- | --- | --- | --- |
 | T147 | `ready`、DB にシード S | 一覧を開く | S の一覧（行の順も含めて一致） | I4-1 |
 | T148 | 同上 | 1行目をタップ（手順15で詳細のルートを作ってから足す） | 詳細の URL が `/sleep/2026-11-25` になり、S の詳細が出る | I4-1 |
-| T149 | `@/drizzle/migrations` を壊れたものに差し替え | `/` を開く | 「データベースの準備に失敗しました」が出て、`queryCategorySamples`・連携状態の取得関数が呼ばれない | I4-11b |
+| T149 | `@/drizzle/migrations` を、T131 と同じ壊れた SQL のマイグレーション1件に差し替える。その `when` は本物の最後のマイグレーションより新しくする（手順14 のテスト用DBは適用済みなので、古いとスキップされて失敗が起きないため） | `/` を開く | 「データベースの準備に失敗しました」が出て、`queryCategorySamples`・連携状態の取得関数が呼ばれない | I4-11b |
 | T150 | iOS `notRequested`、要求成功後は `ready`、DB 空、モックはシード S を返す | 「ヘルスケアと連携する」を押す | `requestAuthorization` が1回呼ばれ、同期して S の一覧が出る 。Android（`notGranted`、許可後は `ready`）でも「ヘルスコネクトと連携する」を押すと `requestPermission` が1回呼ばれ、S の一覧が出る | I4-2 |
 | T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン | I4-2 |
 | T152 | Android `notGranted`、要求後も `notGranted` | 「ヘルスコネクトと連携する」を押す | 案内は `notGranted` のまま、`readRecords` が呼ばれない | I4-2b |
@@ -793,6 +795,7 @@
 <!-- ai-review スキルが合格時に1行ずつ追記する（例：- 2026-11-18 plan 合格（1ラウンド）） -->
 - 2026-11-25 plan 合格（9ラウンド。9ラウンド目の P1 4件を修正後、再レビューせず人間の判断で合格。9ラウンド目の P2 のうち未対応の6件（テスト番号の並び、単体テストのファイルパス、詳細画面の日付見出し・案内、並べ替えのケース、`start_at` のインデックス）は test 段階で扱う）
 - 2026-11-26 test 合格（5ラウンド。5ラウンド目の P1 2件・P2 12件を修正後、再レビューせず人間の判断で合格。TODO：詳細画面の日付見出し・案内、`start_at` のインデックス、版番号の更新後の読み直し中に「読み込み中」が出ないことの確認方法（T166））
+- 2026-11-26 test 合格（再レビュー：手順12 T130・T131 と T149、3.3 の `@/drizzle/migrations` の差し替え。1ラウンド。P1 3件・P2 3件を修正後、再レビューせず人間の判断で合格）
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
