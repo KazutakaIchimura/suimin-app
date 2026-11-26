@@ -211,7 +211,7 @@
 | `src/features/sleep-record/sleep-record-day.service.ts` | サービス（純粋） | 睡眠の一覧から、日ごとの要約（一覧用）と1日の詳細（主睡眠・昼寝・ステージ内訳）を作る |
 | `src/features/sleep-record/sleep-record-date.service.ts` | サービス（純粋） | 詳細画面の日付パラメータを検証し、正しい帰属日（`YYYY-MM-DD`）か不正かを返す |
 | `src/features/sleep-record/sleep-record-guide.service.ts` | サービス（純粋） | 連携状態・OS・睡眠の有無・同期中か・同期失敗の有無から、表示する案内の一覧を決める |
-| `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 表示用の整形（分→「7時間32分」、時刻→「23:14」、日付→「11月25日（水）」） |
+| `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 表示用の整形（分→「7時間32分」、時刻→「23:14」、日付→「11月25日（水）」）。02 で、期間の見出し・軸の分の時刻・グラフの日付の文字・日ごとのボタンの読み上げの説明を追加（`docs/features/02_sleep-chart.md`） |
 | `src/features/sleep-record/sleep-record-sync-range.service.ts` | サービス（純粋） | 取り込み範囲（開始・ヘルスケアの読み取り開始）の計算と、起床時刻による採用の判定 |
 | `src/features/sleep-record/sleep-record-sync.service.ts` | サービス | 同期の実行（範囲の計算 → ヘルスケアの読み取り → 組み立て → DB の入れ替え）。`os`・`requestId`・現在時刻を返す関数 `getNow`（受け口層が `@/lib/clock` を渡す）を引数で受け取る。同期開始時刻とログの `ms` は `getNow` で測る |
 | `src/features/sleep-record/sleep-record-access.service.ts` | サービス | 連携状態の取得・許可の要求・設定を開く、の窓口（失敗はログを出して投げ直す） |
@@ -221,7 +221,7 @@
 | `src/features/sleep-record/sleep-record-sync-provider.tsx` | 受け口 | `use-sleep-record-sync` を1回だけ動かすコンポーネント。`src/app/_layout.tsx` が子要素を包んで描画する。起動時の同期は睡眠記録の業務なので `src/lib/` ではなく機能フォルダに置き、`src/app/` は画面コンポーネントと同じく描画するだけにする |
 | `src/features/sleep-record/use-sleep-record-list.ts` | 受け口 | store の連携状態と DB の睡眠から、案内・日ごとの要約一覧を画面用の状態にする。表示用の整形（整形サービス。「今年」の判定に使う現在日は `@/lib/clock` から渡す）もここで呼び、画面には整形済みの文字列を渡す。版番号が変わったら読み直す。`Platform.OS` を読み、`requestId` を作ってサービスに渡す |
 | `src/features/sleep-record/use-sleep-record-detail.ts` | 受け口 | 日付パラメータを検証（日付の検証サービス）し、指定日の詳細を整形済みの画面用の状態にする。版番号が変わったら読み直す。`requestId` を作ってサービスに渡す |
-| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
+| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。上部の「週・月の推移」ボタン（02 で追加。`/chart` へ移る）・案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
 | `src/features/sleep-record/sleep-record-detail-screen.tsx` | 受け口 | 詳細画面。主睡眠・ステージ内訳・昼寝の一覧・日付不正／データなし／読み取りエラーの表示 |
 | `src/features/sleep-record/sleep-record-access-guide.tsx` | 受け口 | 連携状態に応じた案内文とボタン。一覧画面の部品で、表示する案内と押したときの操作を props で受け取る（サービス・store を直接呼ばない） |
 
@@ -251,7 +251,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 
 | パス | 内容 |
 | --- | --- |
-| `tests/e2e/seed/sleep-seed.js` | シードの定義（「睡眠なし」「数日分」「14日分」）。日付は実行日から逆算した相対日で持ち、`buildSeed(名前, 現在時刻)` で睡眠とステージ区間の絶対時刻を返す。`expectedLatest(名前, 現在時刻)` で、最新日の日付・合計睡眠時間・就寝〜起床・睡眠時間の表示文字列（3.4 の形）を返す。日付と時刻はどちらも日本時間（+09:00）で計算し、動かす機械のタイムゾーンに左右されないようにする（Maestro の `runScript` はパソコン側で、シードアプリはエミュレータで動くため）。シードアプリと Maestro の `runScript` の両方から使うため、import を使わない素の JavaScript にする（`module` があるときだけ `module.exports` する）。Maestro から使うときは、環境変数 `SEED` で名前を受け、`output.latestDate`・`output.latestTotal`・`output.latestTime`・`output.latestMainTotal` に文字列を入れる。「14日分」は今回のフローでは使わず、スマートアラームの推定（testing.md の「推定に足りる日数」）のために置いておく。日付の文字列は 3.4 のとおり、今年（日本時間の現在日の年）以外なら年を付ける。表示文字列の作り方はアプリの整形サービスを使わず、このファイルに書く（E2E でアプリ内部を使わないため） |
+| `tests/e2e/seed/sleep-seed.js` | シードの定義（「睡眠なし」「数日分」「14日分」）。日付は実行日から逆算した相対日で持ち、`buildSeed(名前, 現在時刻)` で睡眠とステージ区間の絶対時刻を返す。`expectedLatest(名前, 現在時刻)` で、最新日の日付・合計睡眠時間・就寝〜起床・睡眠時間の表示文字列（3.4 の形）を返す。日付と時刻はどちらも日本時間（+09:00）で計算し、動かす機械のタイムゾーンに左右されないようにする（Maestro の `runScript` はパソコン側で、シードアプリはエミュレータで動くため）。シードアプリと Maestro の `runScript` の両方から使うため、import を使わない素の JavaScript にする（`module` があるときだけ `module.exports` する）。Maestro から使うときは、環境変数 `SEED` で名前を受け、`output.latestDate`・`output.latestTotal`・`output.latestTime`・`output.latestMainTotal` に文字列を入れる。「14日分」は今回のフローでは使わず、スマートアラームの推定（testing.md の「推定に足りる日数」）のために置いておく。日付の文字列は 3.4 のとおり、今年（日本時間の現在日の年）以外なら年を付ける。表示文字列の作り方はアプリの整形サービスを使わず、このファイルに書く（E2E でアプリ内部を使わないため）。02 で、今日を含む週の見出しの文字列と、最新日が今週にあるかを `output` に足す（`docs/features/02_sleep-chart.md`） |
 | `tests/e2e/seed/seeder-app/` | シードアプリ（Android だけ。別の Expo プロジェクトで、`package.json`・`app.json`・`tsconfig.json`・`metro.config.js` を持つ。パッケージ名は `dev.suimin.e2eseeder`）。`../sleep-seed.js` はフォルダの外にあるため、`metro.config.js` の `watchFolders` に `tests/e2e/seed/` を入れて読む。依存は `tests/e2e/seed/seeder-app/` で `npm install` して入れる。`app.json` には本体と同じく `react-native-health-connect` と `expo-build-properties`（compileSdk 36 など。3.3「設定・依存」と同じ値）のプラグインを入れる。ビルドは JS を同梱する preview の APK にする（開発ビルドどうしだと、どちらも Metro の同じポートにつなぎに行き、本体の `npx expo start` と同時に動かせないため）。そのため `tests/e2e/seed/seeder-app/eas.json` に `preview` プロファイル（`android.buildType: apk`）を置き、`eas build --profile preview --platform android` で作る。権限は `android.permission.health.WRITE_SLEEP` だけ。画面に「睡眠なし」「数日分」「14日分」のボタンがあり、押すと書き込みの許可を確かめ（なければ要求し）、このアプリが書いた SleepSession を直近60日ぶん消して（`deleteRecordsByTimeRange`。ヘルスコネクトは書いたアプリのデータしか消せない）、そのシードを `insertRecords` で入れる。終わったら「投入完了：<名前>」、失敗したら「投入失敗」を出す。ログ・画面に睡眠の時刻は出さない |
 | `tests/e2e/seed/README.md` | 実行前の準備（シードアプリと本体の開発ビルドをエミュレータに入れる・エミュレータの言語を日本語、タイムゾーンを Asia/Tokyo にする・エミュレータに他のアプリの睡眠データを入れない）、実行のコマンド、0時（日本時間）をまたぐ時間帯に実行しないこと、エミュレータとパソコンの時計をそろえること（シードアプリと `runScript` がそれぞれの現在時刻から日付を逆算するため）、許可の取り消し・付け直しの方法（下の確認の結果）、iOS が未対応であること。各フローは前のフローの結果に左右されず、実行の順序は問わない |
 | `tests/e2e/subflows/seed.yaml` | シードアプリを起動して、環境変数 `SEED` のボタンを押し、「投入完了：<名前>」を待つ |
@@ -790,7 +790,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | T148 | 同上 | 1行目をタップ（手順15で詳細のルートを作ってから足す） | 詳細の URL が `/sleep/2026-11-25` になり、S の詳細が出る | I4-1 |
 | T149 | `@/drizzle/migrations` を、T131 と同じ壊れた SQL のマイグレーション1件に差し替える。その `when` は本物の最後のマイグレーションより新しくする（手順14 のテスト用DBは適用済みなので、古いとスキップされて失敗が起きないため） | `/` を開く | 「データベースの準備に失敗しました」が出て、`queryCategorySamples`・連携状態の取得関数が呼ばれない | I4-11b |
 | T150 | iOS `notRequested`、要求成功後は `ready`、DB 空、モックはシード S を返す | 「ヘルスケアと連携する」を押す | `requestAuthorization` が1回呼ばれ、同期して S の一覧が出る 。Android（`notGranted`、許可後は `ready`）でも「ヘルスコネクトと連携する」を押すと `requestPermission` が1回呼ばれ、S の一覧が出る | I4-2 |
-| T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン | I4-2 |
+| T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン（02 で一覧の上に足した「週・月の推移」ボタンは数えない） | I4-2 |
 | T152 | Android `notGranted`、要求後も `notGranted` | 「ヘルスコネクトと連携する」を押す | 案内は `notGranted` のまま、`readRecords` が呼ばれない | I4-2b |
 | T153 | Android `notGranted` | 設定を開くボタンを押す | `openHealthConnectSettings` が1回呼ばれる | I4-2b |
 | T154 | `openHealthConnectSettings` が1回目は例外、2回目は保留 | 押す → もう一度押す | 1回目のあと「ヘルスコネクトの設定を開けませんでした。設定アプリからヘルスコネクトを開いてください」が出る。2回目を押すと、保留中のうちに表示が消える | I4-2b |
@@ -869,3 +869,4 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
+- 2026-11-26 02（週・月の推移のグラフ）のため、一覧画面の上に「週・月の推移」ボタンを追加し、整形サービスに関数を追加（詳細は `docs/features/02_sleep-chart.md`）
