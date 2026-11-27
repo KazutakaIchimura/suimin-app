@@ -1,12 +1,12 @@
 // 一覧画面（設計書 3.1・3.4）。案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ）・下に引いて更新
-import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { SleepRecordAccessGuide } from '@/features/sleep-record/sleep-record-access-guide';
 import { useSleepRecordList } from '@/features/sleep-record/use-sleep-record-list';
 
 export function SleepRecordListScreen() {
-  const { state, refreshing, onRefresh, onAction, retryRead } = useSleepRecordList();
+  const { state, refreshing, onRefresh, onAction, retryRead, openChart, openDay } =
+    useSleepRecordList();
 
   if (state.kind === 'loading') {
     return (
@@ -30,6 +30,12 @@ export function SleepRecordListScreen() {
       }
       ListHeaderComponent={
         <View>
+          {/* 週・月の推移（02）。一覧を表示しているときだけ出す（読み取りに失敗したときは出さない） */}
+          {state.rows !== null && (
+            <Pressable accessibilityRole="button" onPress={openChart} style={styles.message}>
+              <Text>週・月の推移</Text>
+            </Pressable>
+          )}
           <SleepRecordAccessGuide
             guides={state.guides}
             requesting={state.requesting}
@@ -54,7 +60,7 @@ export function SleepRecordListScreen() {
         <Pressable
           testID="sleep-record-row"
           accessibilityRole="button"
-          onPress={() => router.push(`/sleep/${item.wakeDate}`)}
+          onPress={() => openDay(item.wakeDate)}
           style={styles.row}
         >
           <Text>{item.dateLabel}</Text>

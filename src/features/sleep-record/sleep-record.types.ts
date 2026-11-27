@@ -124,3 +124,43 @@ export type Guide = {
   message: string | null;
   buttons: GuideButton[];
 };
+
+// ここから 02 のグラフ（設計書 docs/features/02_sleep-chart.md の 3.1）
+
+/** 時刻の縦軸の始まり：帰属日の前日の 18 時（「軸の分」の 0。3.1「時刻の縦軸」） */
+export const CHART_AXIS_START_HOUR = 18;
+
+/** 時刻の縦軸の長さ（前日 18:00〜当日 18:00 の24時間を分で） */
+export const CHART_AXIS_MINUTES = 24 * 60;
+
+/** 睡眠時間の棒の縦軸の上限（12時間を分で。3.1「日ごとの値」） */
+export const CHART_BAR_MAX_MINUTES = 12 * 60;
+
+/** 期間の種類（週・月） */
+export type PeriodKind = 'week' | 'month';
+
+/** 期間（最初の日〜最後の日。どちらも含む） */
+export type Period = { kind: PeriodKind; start: string; end: string };
+
+/** 切り替えられる範囲（最初の期間〜最後の期間） */
+export type PeriodBounds = { first: Period; last: Period };
+
+/** 就寝〜起床の帯（軸の分。描く範囲 0〜1440 に切ったもの） */
+export type ChartBand = { from: number; to: number };
+
+/** 日ごとの値。睡眠のない日・未来の日は `null` */
+export type ChartDayValue = {
+  asleepMinutes: number;
+  /** 棒の高さ（0〜720分に切ったもの） */
+  barMinutes: number;
+  /** 就寝・起床の軸の分（切る前） */
+  bedOffset: number;
+  wakeOffset: number;
+  /** 描く帯。切ると長さが0になる日は `null`（描かない） */
+  band: ChartBand | null;
+};
+
+export type ChartDay = { wakeDate: string; value: ChartDayValue | null };
+
+/** 期間の平均（軸の分は切る前の値で平均する） */
+export type ChartAverage = { asleepMinutes: number; bedOffset: number; wakeOffset: number };
