@@ -219,9 +219,9 @@
 | `src/features/sleep-record/sleep-record.store.ts` | 受け口 | 画面をまたいで共有する状態（連携状態・同期中か（`sync()` の実行中）・最後の同期エラー・許可の要求中か・許可の要求／設定を開くの失敗・データの版番号）と、その操作（`refreshAccess`・`sync`・`requestAccess`・`openSettings`）。サービスを呼び、届いたエラーを画面の状態にする。同期中の重複実行を防ぐ。`Platform.OS` を読み、操作ごとに `requestId` を作ってサービスに渡す |
 | `src/features/sleep-record/use-sleep-record-sync.ts` | 受け口 | 起動時・前面復帰時（`AppState`）に store の `sync()` を呼ぶ |
 | `src/features/sleep-record/sleep-record-sync-provider.tsx` | 受け口 | `use-sleep-record-sync` を1回だけ動かすコンポーネント。`src/app/_layout.tsx` が子要素を包んで描画する。起動時の同期は睡眠記録の業務なので `src/lib/` ではなく機能フォルダに置き、`src/app/` は画面コンポーネントと同じく描画するだけにする |
-| `src/features/sleep-record/use-sleep-record-list.ts` | 受け口 | store の連携状態と DB の睡眠から、案内・日ごとの要約一覧を画面用の状態にする。表示用の整形（整形サービス。「今年」の判定に使う現在日は `@/lib/clock` から渡す）もここで呼び、画面には整形済みの文字列を渡す。版番号が変わったら読み直す。`Platform.OS` を読み、`requestId` を作ってサービスに渡す |
+| `src/features/sleep-record/use-sleep-record-list.ts` | 受け口 | store の連携状態と DB の睡眠から、案内・日ごとの要約一覧を画面用の状態にする。表示用の整形（整形サービス。「今年」の判定に使う現在日は `@/lib/clock` から渡す）もここで呼び、画面には整形済みの文字列を渡す。版番号が変わったら読み直す。`Platform.OS` を読み、`requestId` を作ってサービスに渡す。画面の移動の関数（行のタップで詳細へ移る `openDay`、02 で足した `openChart`）を返す（architecture.md「画面の移動はフックから」） |
 | `src/features/sleep-record/use-sleep-record-detail.ts` | 受け口 | 日付パラメータを検証（日付の検証サービス）し、指定日の詳細を整形済みの画面用の状態にする。版番号が変わったら読み直す。`requestId` を作ってサービスに渡す |
-| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。上部の「週・月の推移」ボタン（02 で追加。`/chart` へ移る）・案内・同期エラー・読み取りエラー・日ごとの行（タップで詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
+| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。上部の「週・月の推移」ボタン（02 で追加。フックの `openChart` を呼ぶ）・案内・同期エラー・読み取りエラー・日ごとの行（タップでフックの `openDay` を呼び、詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
 | `src/features/sleep-record/sleep-record-detail-screen.tsx` | 受け口 | 詳細画面。主睡眠・ステージ内訳・昼寝の一覧・日付不正／データなし／読み取りエラーの表示 |
 | `src/features/sleep-record/sleep-record-access-guide.tsx` | 受け口 | 連携状態に応じた案内文とボタン。一覧画面の部品で、表示する案内と押したときの操作を props で受け取る（サービス・store を直接呼ばない） |
 
@@ -870,3 +870,4 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
 - 2026-11-26 02（週・月の推移のグラフ）のため、一覧画面の上に「週・月の推移」ボタンを追加し、整形サービスに関数を追加（詳細は `docs/features/02_sleep-chart.md`）
+- 2026-11-28 画面の移動をフックから呼ぶ決まり（architecture.md）に合わせ、一覧の行のタップの移動を一覧のフックの `openDay` に移した（動きは変えない。02 の PR #2 のレビューで人間が判断）

@@ -152,6 +152,8 @@ export function useSleepRecordList() {
 
   /** 「週・月の推移」：グラフの画面へ移る（02） */
   const openChart = () => router.push('/chart');
+  /** 行のタップ：その日の詳細へ移る */
+  const openDay = (wakeDate: string) => router.push(`/sleep/${wakeDate}`);
 
-  return { state, refreshing, onRefresh, onAction, retryRead, openChart };
+  return { state, refreshing, onRefresh, onAction, retryRead, openChart, openDay };
 }

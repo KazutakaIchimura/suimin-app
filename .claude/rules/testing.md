@@ -43,6 +43,10 @@ E2Eは、固定のデータを入れたデータベースに対して走らせ�
 - 実行の流れ：シード投入 → アプリ起動
 - 読み取り専用のテストは既存シードを使う。変更を伴うテストは専用データを準備処理（Jest は `beforeEach`、Maestro はフロー冒頭の `runFlow`）で作り、後始末する
 
+## 変換の条件を本番にそろえる
+- Jest の変換は、アプリと同じく React Compiler を通す（`jest.config.js` で jest-expo の変換に `supportsReactCompiler: true` を渡す。アプリは `app.json` の `experiments.reactCompiler`）
+  - 理由：jest-expo の既定は Compiler を通さないため、Compiler の最適化でだけ起きる不具合（描画中に取る現在時刻がキャッシュされるなど）をテストで見逃すため
+
 ## 骨抜き禁止
 
 次のようなテストは、何も守っていないので書かない。
