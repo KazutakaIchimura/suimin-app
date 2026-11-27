@@ -1,4 +1,5 @@
-// 手順14・15 の「シード S」（設計書「テストリスト」手順14 の前提）。
+// 01 の手順14・15 の「シード S」（01 の設計書「テストリスト」手順14 の前提）と、
+// 02 の手順5 の「シード C」（02 の設計書「テストリスト」の共通の前提。S に 11/17・10/30 を足したもの）。
 // DB に入れる場合も、ネイティブのモックが返す場合も同じ睡眠になるようにする
 import type Database from 'better-sqlite3';
 
@@ -9,8 +10,11 @@ const jst = (local: string) => new Date(`${local}:00+09:00`).getTime();
 
 type Stage = 'awake' | 'light' | 'deep' | 'rem';
 
-/** シード S の睡眠：[id, 就寝, 帰属日, 睡眠時間（分）, ステージと長さ（分）を就寝から隙間なく] */
-const S_SESSIONS: [string, string, string, number, [Stage, number][]][] = [
+/** 睡眠：[id, 就寝, 帰属日, 睡眠時間（分）, ステージと長さ（分）を就寝から隙間なく] */
+type SeedSession = [string, string, string, number, [Stage, number][]];
+
+/** シード S の睡眠 */
+const S_SESSIONS: SeedSession[] = [
   [
     's-main-25',
     '2026-11-24T23:14',
@@ -27,6 +31,13 @@ const S_SESSIONS: [string, string, string, number, [Stage, number][]][] = [
   ['s-main-24', '2026-11-23T23:00', '2026-11-24', 420, [['light', 420]]],
 ];
 
+/** シード C の睡眠（シード S ＋ 11/17・10/30） */
+const C_SESSIONS: SeedSession[] = [
+  ...S_SESSIONS,
+  ['c-main-17', '2026-11-17T00:30', '2026-11-17', 420, [['light', 420]]],
+  ['c-main-1030', '2026-10-29T23:30', '2026-10-30', 420, [['light', 420]]],
+];
+
 /** 各睡眠のステージ区間（UNIX ミリ秒） */
 function intervals(start: string, stages: [Stage, number][]) {
   let at = jst(start);
@@ -37,15 +48,15 @@ function intervals(start: string, stages: [Stage, number][]) {
   });
 }
 
-/** シード S を、テスト対象を通さず SQL で DB に入れる */
-export function seedS(sqlite: Database.Database): void {
+/** 睡眠を、テスト対象を通さず SQL で DB に入れる */
+function seedSessions(sqlite: Database.Database, sessions: SeedSession[]): void {
   const insertSession = sqlite.prepare(
     'INSERT INTO sleep_sessions (id, source_id, start_at, end_at, wake_date, asleep_minutes, has_stages) VALUES (?, ?, ?, ?, ?, ?, 1)',
   );
   const insertStage = sqlite.prepare(
     'INSERT INTO sleep_stages (session_id, stage, start_at, end_at) VALUES (?, ?, ?, ?)',
   );
-  for (const [id, start, wakeDate, asleepMinutes, stages] of S_SESSIONS) {
+  for (const [id, start, wakeDate, asleepMinutes, stages] of sessions) {
     const list = intervals(start, stages);
     insertSession.run(
       id,
@@ -62,9 +73,9 @@ export function seedS(sqlite: Database.Database): void {
 /** HealthKit の睡眠の値（CategoryValueSleepAnalysis） */
 const HK_VALUE: Record<Stage, number> = { awake: 2, light: 3, deep: 4, rem: 5 };
 
-/** シード S と同じ睡眠になる HealthKit の睡眠サンプル（`queryCategorySamples` の戻り値） */
-export function sIosSamples() {
-  return S_SESSIONS.flatMap(([id, start, , , stages]) =>
+/** 睡眠と同じ睡眠になる HealthKit の睡眠サンプル（`queryCategorySamples` の戻り値） */
+function iosSamplesOf(sessions: SeedSession[]) {
+  return sessions.flatMap(([id, start, , , stages]) =>
     intervals(start, stages).map((s, i) => ({
       uuid: `${id}-${i}`,
       value: HK_VALUE[s.stage],
@@ -73,6 +84,26 @@ export function sIosSamples() {
       sourceRevision: { source: { name: 'SOXAI', bundleIdentifier: 'com.soxai' } },
     })),
   );
+}
+
+/** シード S を DB に入れる */
+export function seedS(sqlite: Database.Database): void {
+  seedSessions(sqlite, S_SESSIONS);
+}
+
+/** シード C を DB に入れる */
+export function seedC(sqlite: Database.Database): void {
+  seedSessions(sqlite, C_SESSIONS);
+}
+
+/** シード S と同じ睡眠になる HealthKit の睡眠サンプル */
+export function sIosSamples() {
+  return iosSamplesOf(S_SESSIONS);
+}
+
+/** シード C と同じ睡眠になる HealthKit の睡眠サンプル。`exclude` に挙げた id の睡眠は除く */
+export function cIosSamples(exclude: string[] = []) {
+  return iosSamplesOf(C_SESSIONS.filter(([id]) => !exclude.includes(id)));
 }
 
 /** ヘルスコネクトのステージの値（SleepStageType） */

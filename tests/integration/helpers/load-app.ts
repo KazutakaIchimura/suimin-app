@@ -25,7 +25,16 @@ export function warmUpApp(): void {
     require('@/app/_layout');
     require('@/app/index');
     require('@/app/sleep/[date]');
+    require('@/app/chart');
   });
+}
+
+/**
+ * 偽のタイマー（modern）を使っていれば、いまの（固定した）時刻。使っていなければ `undefined`。
+ * 見分け方は RNTL と同じ（modern の偽のタイマーは `setTimeout` に `clock` を持たせる）
+ */
+function fakeSystemTime(): number | undefined {
+  return 'clock' in setTimeout ? Date.now() : undefined;
 }
 
 /** 描画したものを片づける（afterEach で呼ぶ） */
@@ -48,7 +57,11 @@ export function loadApp(os: HealthOs = 'ios') {
     return { remove: jest.fn() };
   });
   (require('./reset-health-mocks') as typeof import('./reset-health-mocks')).resetHealthMocks();
+  // RNTL は読み込むときに偽のタイマーを入れ直し、`jest.setSystemTime` で固定した時刻を実際の時刻に戻す。
+  // 偽のタイマーを使っているテストでは、読み込む前の時刻に戻す
+  const fixedNow = fakeSystemTime();
   const rntl = require('expo-router/testing-library') as Rntl;
+  if (fixedNow !== undefined) jest.setSystemTime(fixedNow);
   cleanup = rntl.cleanup;
   // 各テストで expo-router ごと読み込み直すため、並列実行で重いと初回の描画が遅くなる。条件を待つ上限だけを上げる
   rntl.configure({ asyncUtilTimeout: 5000 });

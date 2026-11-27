@@ -85,7 +85,7 @@
 #### 設定・依存
 | パス | 変更 |
 | --- | --- |
-| `jest.config.js` | `setupFiles` に `tests/setup/native-render-mocks.js` を足す（jest-expo の既定の `setupFiles` のあとに足す） |
+| `jest.config.js` | `setupFiles` に `tests/setup/native-render-mocks.js` を足す（jest-expo の既定の `setupFiles` のあとに足す）。あわせて、jest-expo の Babel の変換に `supportsReactCompiler: true` を渡し、アプリ（`app.json` の `experiments.reactCompiler`）と同じく React Compiler を通して変換する（jest-expo の既定は通さないため、Compiler の最適化で起きる不具合をテストで見逃す。2026-11-28 の impl レビューで人間が判断） |
 | `src/app/_layout.tsx`・`babel.config.js`（必要なら） | 下の確認の結果、`victory-native` に `GestureHandlerRootView` や Reanimated の Babel の設定が要るときだけ変える（`_layout.tsx` は包む部品を足すだけで、処理は書かない）。確かめた結果（2026-11-26）：どちらも変えない。`victory-native` 42 は `CartesianChart` の中で `GestureHandlerRootView` で包むので、アプリ側で包む必要はない。Reanimated の Babel の設定は `babel-preset-expo` に含まれる。実機で効くかは E4 で確かめる |
 | `tests/setup/native-render-mocks.js`（新規） | `victory-native` と `@shopify/react-native-skia` を、何も描かない部品に差し替える（`jest.mock`） |
 | `tests/e2e/chart-flow.yaml`（新規） | E4 のフロー（`tags: [android]`） |
@@ -103,7 +103,7 @@
 | `src/features/sleep-record/sleep-record-period.service.ts` | サービス（純粋） | 期間の計算：ある日を含む週・月、前後の期間、切り替えられる範囲（今日以前の最も古い帰属日〜今日）、週・月の切り替え、範囲の端への寄せ、端末のタイムゾーンでの今日の日付（現在時刻を引数で受け、`YYYY-MM-DD` にする `localDate`） |
 | `src/features/sleep-record/sleep-record-chart.service.ts` | サービス（純粋） | 日ごとの要約から、期間の日ごとの値（睡眠時間・棒の高さ（12時間で切る）・就寝〜起床の軸の分・切ったあとの帯（描かない日は `null`））と平均を作る。期間の日を並べるのは最大31日まで（期間の値が壊れていても止まるように。最後の日に届かなければ31日を並べて止め、最後の日が最初の日より前なら最初の日の1日だけ並べる。期間はサービスの関数で作るので、ふだんは起きない） |
 | `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 次を足す：期間の見出し（週・月）、軸の分を時刻（「23:30」）に直す整形、グラフの日付の文字（週「25（水）」・月「25」）、日ごとのボタンの読み上げの説明 |
-| `src/features/sleep-record/use-sleep-record-chart.ts` | 受け口 | 表示中の期間（週か月か・期間の最初の日）を状態に持ち、DB の日ごとの要約（読み取りの窓口）から、期間の見出し・平均・日ごとの値・読み上げの説明・前後へ移れるかを、整形済みの画面用の状態にする。前後の移動・切り替え・下に引く・読み取りの再試行・日のタップ（詳細へ移る）を受ける。版番号が変わったら読み直す。`requestId` を作って窓口に渡す。アプリが前面に戻ったら（`background` → `active`）描き直す（`AppState` を見るのは受け口層） |
+| `src/features/sleep-record/use-sleep-record-chart.ts` | 受け口 | 表示中の期間（週か月か・期間の最初の日）を状態に持ち、DB の日ごとの要約（読み取りの窓口）から、期間の見出し・平均・日ごとの値・読み上げの説明・前後へ移れるかを、整形済みの画面用の状態にする。前後の移動・切り替え・下に引く・読み取りの再試行・日のタップ（詳細へ移る）を受ける。版番号が変わったら読み直す。`requestId` を作って窓口に渡す。アプリが前面に戻ったら（`background` → `active`）描き直す（`AppState` を見るのは受け口層）。「今日」を描画のたびに取るため、`'use no memo'` で React Compiler の最適化から外す（Compiler は描画を純粋とみなし、`now()` を描画の結果ごとキャッシュするため） |
 | `src/features/sleep-record/sleep-record-chart-screen.tsx` | 受け口 | グラフの画面。期間の見出し・週と月の切り替え・前後のボタン・平均・2つのグラフ（描画の部品）・日ごとの重ねたボタン・読み取りエラー・下に引いて更新。フックの状態を表示し、操作をフックに渡すだけ |
 | `src/features/sleep-record/sleep-record-chart-canvas.tsx` | 受け口 | `victory-native` と Skia でグラフを描くだけの部品。整形済みの値（日ごとの棒の高さ・帯の上端と下端）を props で受け取り、業務の計算はしない（描画の座標の変換だけを行う）。睡眠時間は `CartesianChart` と `Bar`、帯は `CartesianChart` の描画の関数に渡る座標の変換で Skia の `Rect` を描く |
 | `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧の上（案内より上）に「週・月の推移」ボタンを足す。押すとフックの `openChart` を呼ぶ |
@@ -116,6 +116,7 @@
 
 #### テスト
 - `victory-native` と `@shopify/react-native-skia` は、`tests/setup/native-render-mocks.js` で、何も描かない部品に差し替える（`.claude/rules/testing.md` の「描画をネイティブで行うライブラリ」。全テストに効く。`renderRouter` が `src/app/chart.tsx` を読み込むため、01 の画面テストにも要る）。描画の部品に渡す値は、純粋関数（`sleep-record-chart.service.ts`）の単体テストで確かめ、フックがその値をそのまま描画の部品に渡していることは中間テスト（I6-11）で確かめる
+- 描画の部品に渡る値（I6-11）は、RNTL 14 に部品の種類で選ぶ API（`UNSAFE_getByType`）がないため、描画された要素の Fiber（`unstable_fiber`）を親へさかのぼって部品の種類で探す。testing.md の「入れ子の構造に依存しない」は守る（部品の種類で選ぶ）。見つからなければ理由を書いて投げる（RNTL・React を上げて Fiber の作りが変わったときに分かるように）。2026-11-28 の impl レビューで人間が認めた
 - 01 と同じく、ほかに差し替えるのはネイティブのヘルスケアのライブラリ・`@/lib/db`（テスト用DB）・`Platform.OS`・`AppState` だけ。画面のテストは 01 の補助（`tests/integration/helpers/load-app.ts`・`seed-s.ts` など）を使い、`renderRouter` で実際の `src/app/` を読み込む
 - 現在時刻は 01 の I4 と同じく `jest.setSystemTime` で固定する
 
@@ -319,6 +320,7 @@
 - 2026-11-28 test 再レビュー合格（impl 1ラウンド目の指摘でテストリストを直したため再実行。1ラウンド。P0 0件、P1 0件、P2 7件。P2 のうち3件と要確認1件（今日より後の睡眠だけの期間は「この期間の睡眠データはありません」。T049 を追加）を修正後、再レビューせず人間の判断で合格。TODO：P2 の残り4件。①切り替えた先を範囲の端に寄せる動きの中間テスト（例：DB に 11/20・11/25 だけ置き「月」→「週」で 11月16日〜22日）②月の表示での描画のたびの収め直し（T039 の月版）③読み直すのは版番号・再試行の回数が変わったときだけ（`loadDaySummaries` の呼び出し回数）④範囲の前の端が今日の週・月だけのときの境界（単体）)
 - 2026-11-28 test 合格（impl 2ラウンド目の指摘で追加した T050・T051 の分。1ラウンド。P0 0件、P1 1件、P2 4件、要確認2件。P1・P2 3件・要確認を修正後、再レビューせず人間の判断で合格。TODO：睡眠はあるが帯がない日の、描画の部品へ渡る値の中間テスト（単体の T015 で確かめている））
 - 2026-11-28 test 合格（impl 3ラウンド目の指摘で追加した T052〜T054 の分。1ラウンド。P0 0件、P1 2件、P2 6件。P1 と P2 5件を修正後、再レビューせず人間の判断で合格。TZ の切り替えはスコープ外として共通の前提に記載）
+- 2026-11-28 impl 合格（4ラウンド。P0 1→0→0→0件、P1 2→1→2→1件。4ラウンド目の P1（React Compiler で「今日」がキャッシュされる）を、Jest でも Compiler を通す設定と `'use no memo'` で修正後、再レビューせず人間の判断で合格。TODO：①下に引く処理の `sync()` が reject したときの扱い（store は投げないが、catch で握りつぶすと logging.md ルール3に反するので今はそのまま）②期間の最初の日が日付の形でないときの例外 ③目盛りの文字を定数から作る ④「前の週」などの文言をフックで決める ⑤日付計算の重複（`localDate` が 01 にもある、`datesOf` と `addDays`）⑥`seed-s.ts` の名前 ⑦週をまたぐ前面復帰の中間テスト ⑧詳細へ移るパスを expo-router のパラメータで渡す ⑨01 の一覧のフックも描画中に `now()` を取るので、Compiler の最適化が効くと同じ問題が起きうる（01 の範囲）⑩E2E のシードで現在時刻を2回取る ⑪値のない日の棒を高さ0で描いている（実機の E4 で確かめる））
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->

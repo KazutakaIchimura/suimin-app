@@ -1,0 +1,40 @@
+# E4 週・月の推移（02 の設計書のテストリスト T042）
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 数日分
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: allow
+onFlowComplete:
+  - runFlow: subflows/restore.yaml
+---
+# 期待する文字列（今週の見出し・最新日が今週にあるか・最新日の読み上げの説明・詳細の表示）を output に求める
+- runScript:
+    file: seed/sleep-seed.js
+    env:
+      SEED: 数日分
+- extendedWaitUntil:
+    visible: ${output.latestDate}
+    timeout: 60000
+- tapOn: 週・月の推移
+# 「週・月の推移」を押した直後（「前の週」を押す前）は今週の見出し
+- extendedWaitUntil:
+    visible: ${output.chartWeekTitle}
+    timeout: 30000
+# 今日が月曜なら最新日（1日前）は先週にある
+- runFlow:
+    when:
+      true: ${output.latestInThisWeek == 'false'}
+    commands:
+      - tapOn: 前の週
+- tapOn: ${output.latestDayLabel}
+- extendedWaitUntil:
+    visible: ${output.latestMainTotal}
+    timeout: 30000
+- assertVisible: ${output.latestTime}

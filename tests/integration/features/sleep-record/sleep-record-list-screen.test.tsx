@@ -150,7 +150,7 @@ it('Android の notGranted で「ヘルスコネクトと連携する」を押�
   expect(app.hc.requestPermission).toHaveBeenCalledTimes(1);
 });
 
-// T151
+// T151（02 の T043 で直した）
 it.each([
   ['ios', 'unavailable', ['この端末ではヘルスケア連携を使えません'], []],
   ['android', 'unavailable', ['この端末ではヘルスケア連携を使えません'], []],
@@ -173,8 +173,11 @@ it.each([
     await app.open();
 
     for (const text of texts) expect(await app.screen.findByText(text)).toBeOnTheScreen();
-    // ボタンは表のものだけ（数と名前が一致）
-    expect(app.screen.queryAllByRole('button')).toHaveLength(buttons.length);
+    // どの状態でも一覧を表示しているので、02 で足した「週・月の推移」ボタンも出る（02 の T043）
+    const chartEntry = app.screen.getByRole('button', { name: '週・月の推移' });
+    // ボタンは表のものだけ（数と名前が一致）。「週・月の推移」ボタンは数えない
+    const guideButtons = app.screen.queryAllByRole('button').filter((b) => b !== chartEntry);
+    expect(guideButtons).toHaveLength(buttons.length);
     for (const name of buttons) expect(app.screen.getByRole('button', { name })).toBeOnTheScreen();
     expect(app.screen.queryByText(/睡眠データがありません/)).toBeNull();
   },
@@ -573,4 +576,72 @@ it('ready で DB に睡眠があって同期中なら、行が出たまま上部
     reading.resolve(sIosSamples());
     await flushPromises();
   });
+});
+
+const CHART_ENTRY = '週・月の推移';
+
+// 02 の T025
+it.each([
+  ['DB にシード S', true],
+  ['DB 空でモックも0件', false],
+] as const)('ready で %s のとき、「週・月の推移」ボタンが出る', async (_label, seeded) => {
+  const app = load();
+  if (seeded) {
+    seedS(mockTestDb.sqlite);
+    app.hk.queryCategorySamples.mockResolvedValue(sIosSamples() as never);
+  }
+
+  await app.open();
+
+  if (seeded) await expectSList(app);
+  else expect(await app.screen.findByText(/睡眠データがありません。/)).toBeOnTheScreen();
+  expect(app.screen.getByRole('button', { name: CHART_ENTRY })).toBeOnTheScreen();
+});
+
+// 02 の T047
+it('「週・月の推移」ボタンは案内のボタンより上にある', async () => {
+  const app = load('android');
+  app.hc.getGrantedPermissions.mockResolvedValue([]);
+  // 一覧を表示している状態にする（「週・月の推移」は一覧の表示中だけ出る）
+  seedS(mockTestDb.sqlite);
+
+  await app.open();
+
+  await expectSList(app);
+  const buttons = app.screen.getAllByRole('button');
+  const indexOf = (name: string) => buttons.indexOf(app.screen.getByRole('button', { name }));
+  expect(indexOf(CHART_ENTRY)).toBeLessThan(indexOf('ヘルスコネクトと連携する'));
+  expect(indexOf(CHART_ENTRY)).toBeLessThan(indexOf('設定を開く'));
+});
+
+// 02 の T026
+it('連携状態の取得中（読み込み中）は「週・月の推移」ボタンが出ない', async () => {
+  const app = load();
+  const status = deferred<number>();
+  app.hk.getRequestStatusForAuthorization.mockReturnValueOnce(status.promise as never);
+
+  await app.open();
+
+  expect(await app.screen.findByText('読み込み中')).toBeOnTheScreen();
+  expect(app.screen.queryByRole('button', { name: CHART_ENTRY })).toBeNull();
+  status.resolve(1);
+});
+
+// 02 の T027
+it('一覧の読み取りに失敗したときは「週・月の推移」ボタンが出ない', async () => {
+  const app = load();
+  app.hk.getRequestStatusForAuthorization.mockResolvedValue(1 as never); // shouldRequest
+  await app.store.getState().refreshAccess();
+  mockTestDb.close();
+  const { createElement } = require('react') as typeof import('react');
+  const { SleepRecordListScreen } =
+    require('@/features/sleep-record/sleep-record-list-screen') as typeof import('@/features/sleep-record/sleep-record-list-screen');
+  const { render } =
+    require('@testing-library/react-native') as typeof import('@testing-library/react-native');
+
+  await render(createElement(SleepRecordListScreen));
+
+  expect(await app.screen.findByText('睡眠データを読み込めませんでした')).toBeOnTheScreen();
+  expect(app.screen.queryByRole('button', { name: CHART_ENTRY })).toBeNull();
+  mockTestDb.reopen();
 });

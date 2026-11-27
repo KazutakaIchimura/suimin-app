@@ -110,6 +110,36 @@ function expectedLatest(name, now) {
   };
 }
 
+/**
+ * グラフの画面（02）で期待する文字列。今日を含む週（月曜〜日曜）の見出し、
+ * シードの最新日が今週にあるか（今日が月曜なら最新日の1日前は先週）、最新日のボタンの読み上げの説明
+ */
+function expectedChart(name, now) {
+  var todayMidnight = jstMidnight(now);
+  // getUTCDay は日曜が 0。月曜からの日数にする（日本時間の曜日）
+  var sinceMonday = (new Date(todayMidnight + JST_OFFSET_MS).getUTCDay() + 6) % 7;
+  var weekStart = todayMidnight - sinceMonday * DAY_MS;
+  var weekEnd = weekStart + 6 * DAY_MS;
+  var result = {
+    weekTitle: formatDate(weekStart, now) + '〜' + formatDate(weekEnd, now),
+    latestInThisWeek: false,
+    latestDayLabel: null,
+  };
+  var sessions = buildSeed(name, now);
+  if (sessions.length === 0) return result;
+  var latest = sessions[0];
+  result.latestInThisWeek = latest.wakeDayMidnight >= weekStart;
+  result.latestDayLabel =
+    formatDate(latest.wakeDayMidnight, now) +
+    ' 睡眠 ' +
+    formatMinutes(latest.asleepMinutes) +
+    ' 就寝 ' +
+    formatTime(latest.startAt) +
+    ' 起床 ' +
+    formatTime(latest.endAt);
+  return result;
+}
+
 // Maestro の runScript から使うとき：環境変数 SEED の最新日の表示文字列を output に入れる
 if (typeof output !== 'undefined' && typeof SEED !== 'undefined') {
   var expected = expectedLatest(SEED, Date.now());
@@ -119,6 +149,11 @@ if (typeof output !== 'undefined' && typeof SEED !== 'undefined') {
     output.latestTime = expected.time;
     output.latestMainTotal = expected.mainTotal;
   }
+  var chart = expectedChart(SEED, Date.now());
+  output.chartWeekTitle = chart.weekTitle;
+  // Maestro のフローの条件で使うため文字列にする
+  output.latestInThisWeek = chart.latestInThisWeek ? 'true' : 'false';
+  output.latestDayLabel = chart.latestDayLabel;
 }
 
 // シードアプリ（Node・Metro）から使うとき
@@ -126,6 +161,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     buildSeed: buildSeed,
     expectedLatest: expectedLatest,
+    expectedChart: expectedChart,
     SEED_NAMES: Object.keys(SEED_DAYS),
   };
 }

@@ -1,5 +1,6 @@
 // 一覧画面用の状態（設計書 3.1「連携状態と案内」「読み込み中の表示」・3.4）。
 // store の連携状態と DB の睡眠から、案内と整形済みの日ごとの行を作る
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import { useShallow } from 'zustand/react/shallow';
@@ -149,5 +150,8 @@ export function useSleepRecordList() {
     };
   }
 
-  return { state, refreshing, onRefresh, onAction, retryRead };
+  /** 「週・月の推移」：グラフの画面へ移る（02） */
+  const openChart = () => router.push('/chart');
+
+  return { state, refreshing, onRefresh, onAction, retryRead, openChart };
 }

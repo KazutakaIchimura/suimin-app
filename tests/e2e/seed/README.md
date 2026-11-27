@@ -16,6 +16,7 @@
 | `../subflows/reset-app.yaml` | 本体のデータを消して起動し直し、睡眠の読み取りの許可を `READ_SLEEP`（`allow`／`deny`）にする |
 | `../subflows/restore.yaml` | 後始末（シードを「数日分」に、読み取りを許可に戻す） |
 | `../sleep-flow.yaml`・`../deny-android.yaml`・`../no-data.yaml` | Android のフロー（E1・E2・E3） |
+| `../chart-flow.yaml` | Android のフロー（02 の E4。一覧から「週・月の推移」を開き、最新日の詳細へ） |
 | `../deny-ios.yaml` | iOS のフロー（E2。まだ実行しない） |
 
 「14日分」は今回のフローでは使わない（スマートアラームの推定のために置いてある）。

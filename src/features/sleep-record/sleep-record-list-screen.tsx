@@ -6,7 +6,7 @@ import { SleepRecordAccessGuide } from '@/features/sleep-record/sleep-record-acc
 import { useSleepRecordList } from '@/features/sleep-record/use-sleep-record-list';
 
 export function SleepRecordListScreen() {
-  const { state, refreshing, onRefresh, onAction, retryRead } = useSleepRecordList();
+  const { state, refreshing, onRefresh, onAction, retryRead, openChart } = useSleepRecordList();
 
   if (state.kind === 'loading') {
     return (
@@ -30,6 +30,12 @@ export function SleepRecordListScreen() {
       }
       ListHeaderComponent={
         <View>
+          {/* 週・月の推移（02）。一覧を表示しているときだけ出す（読み取りに失敗したときは出さない） */}
+          {state.rows !== null && (
+            <Pressable accessibilityRole="button" onPress={openChart} style={styles.message}>
+              <Text>週・月の推移</Text>
+            </Pressable>
+          )}
           <SleepRecordAccessGuide
             guides={state.guides}
             requesting={state.requesting}
