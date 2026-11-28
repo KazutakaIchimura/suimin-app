@@ -1,0 +1,52 @@
+# E5 アラームの設定と解除（03 の設計書のテストリスト T150）
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 14日分
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: allow
+  - runFlow: subflows/clear-alarm.yaml
+onFlowComplete:
+  - runFlow: subflows/clear-alarm.yaml
+  - runFlow: subflows/restore.yaml
+---
+# 期待する文字列（使う値の説明）を output に求める
+- runScript:
+    file: seed/sleep-seed.js
+    env:
+      SEED: 14日分
+- extendedWaitUntil:
+    visible: ${output.latestDate}
+    timeout: 60000
+- tapOn: アラーム 未設定
+- extendedWaitUntil:
+    visible: ${output.alarmParams}
+    timeout: 30000
+# 今から寝るの最初の候補（4サイクル）の文字を写し、先頭の「H:MM」を取り出す
+- copyTextFrom:
+    text: '.*4サイクル（.*後）'
+- runScript:
+    file: seed/first-time.js
+- tapOn: '.*4サイクル（.*後）'
+# 許可の確認が出たら許可する（文言は最初の実行で確かめる。README）
+- runFlow:
+    when:
+      visible: 許可
+    commands:
+      - tapOn: 許可
+- extendedWaitUntil:
+    visible: '次のアラーム.* ${output.time}'
+    timeout: 30000
+- back
+- assertVisible: 'アラーム.* ${output.time}'
+- tapOn: 'アラーム.* ${output.time}'
+- tapOn: 解除
+- extendedWaitUntil:
+    visible: アラームは設定されていません
+    timeout: 30000

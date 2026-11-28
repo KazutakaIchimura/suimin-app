@@ -26,6 +26,7 @@ export function warmUpApp(): void {
     require('@/app/index');
     require('@/app/sleep/[date]');
     require('@/app/chart');
+    require('@/app/alarm');
   });
 }
 
@@ -57,6 +58,9 @@ export function loadApp(os: HealthOs = 'ios') {
     return { remove: jest.fn() };
   });
   (require('./reset-health-mocks') as typeof import('./reset-health-mocks')).resetHealthMocks();
+  // アラームのライブラリの偽物（tests/setup/native-alarm-mocks.js）も読み込み直されるので、既定に戻してテストに渡す
+  const alarm = require('./alarm-mocks') as typeof import('./alarm-mocks');
+  alarm.resetAlarmMocks();
   // RNTL は読み込むときに偽のタイマーを入れ直し、`jest.setSystemTime` で固定した時刻を実際の時刻に戻す。
   // 偽のタイマーを使っているテストでは、読み込む前の時刻に戻す
   const fixedNow = fakeSystemTime();
@@ -85,6 +89,8 @@ export function loadApp(os: HealthOs = 'ios') {
     },
     hk,
     hc,
+    /** アラームのライブラリの偽物（`fakeAlarmState`・`seedAlarm`・`alarmMock` など） */
+    alarm,
     store,
     open,
     emit,

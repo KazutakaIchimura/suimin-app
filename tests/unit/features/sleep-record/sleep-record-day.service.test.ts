@@ -1,6 +1,7 @@
 import {
   buildDayDetail,
   buildDaySummaries,
+  pickMainSessions,
 } from '@/features/sleep-record/sleep-record-day.service';
 import type {
   DayDetail,
@@ -255,5 +256,33 @@ describe('buildDaySummaries', () => {
   // T055
   it('睡眠0件なら空の配列になる', () => {
     expect(buildDaySummaries([])).toEqual([]);
+  });
+});
+
+// 03 スマートアラームの推定の元データ（設計書 docs/features/03_smart-alarm.md の U1）
+describe('pickMainSessions', () => {
+  // T002
+  it('帰属日ごとに主睡眠だけを、帰属日の古い順に返す（同じ長さなら就寝が早いほう）', () => {
+    const mainStages = contiguous('2026-11-27T23:00', [
+      ['awake', 5 * MIN],
+      ['rem', 415 * MIN],
+    ]);
+    const sessions = [
+      sleep('d27-main', '2026-11-27T23:00', 420, { wakeDate: '2026-11-28', stages: mainStages }),
+      sleep('d27-nap', '2026-11-28T13:00', 30, { wakeDate: '2026-11-28' }),
+      sleep('d26-late', '2026-11-27T01:00', 300, { wakeDate: '2026-11-27' }),
+      sleep('d26-early', '2026-11-27T00:00', 300, { wakeDate: '2026-11-27' }),
+      sleep('d25', '2026-11-25T23:00', 400, { wakeDate: '2026-11-26' }),
+    ];
+
+    const result = pickMainSessions(sessions);
+
+    expect(result.map((s) => s.id)).toEqual(['d25', 'd26-early', 'd27-main']);
+    expect(result[2].stages).toEqual(mainStages);
+  });
+
+  // T003
+  it('睡眠0件なら空の配列になる', () => {
+    expect(pickMainSessions([])).toEqual([]);
   });
 });

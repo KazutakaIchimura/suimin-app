@@ -1,0 +1,20 @@
+# アラームを全部解除する（03 の E5・E6 の準備と後始末。設計書 docs/features/03_smart-alarm.md の 5「E2E」）。
+# どの画面で呼ばれても一覧から始めるよう、アプリを開き直す（データは消さない）。
+# 一覧の入口からアラームの画面を開き、「解除」があれば押して「アラームは設定されていません」になるまで待ち、一覧へ戻る
+appId: dev.suimin.app
+---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: 'アラーム.*'
+    timeout: 60000
+- tapOn: 'アラーム.*'
+- runFlow:
+    when:
+      visible: 解除
+    commands:
+      - tapOn: 解除
+- extendedWaitUntil:
+    visible: アラームは設定されていません
+    timeout: 30000
+- back

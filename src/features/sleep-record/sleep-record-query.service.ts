@@ -1,13 +1,19 @@
-// 画面用の読み取りの窓口（設計書 3.3）。DB の睡眠から日ごとの要約一覧・1日の詳細を作る。失敗はログを出して投げ直す
+// 画面用の読み取りの窓口（設計書 3.3）と、他機能（スマートアラーム。設計書 03 の 3.3）向けの読み取り。DB の睡眠から日ごとの要約一覧・1日の詳細を作る。失敗はログを出して投げ直す
 import {
   buildDayDetail,
   buildDaySummaries,
+  pickMainSessions,
 } from '@/features/sleep-record/sleep-record-day.service';
 import {
   findSessionsByWakeDate,
+  findSessionsByWakeDateRange,
   listSessions,
 } from '@/features/sleep-record/sleep-record.repository';
-import type { DayDetail, DaySummary } from '@/features/sleep-record/sleep-record.types';
+import type {
+  DayDetail,
+  DaySummary,
+  SleepSession,
+} from '@/features/sleep-record/sleep-record.types';
 import { logger } from '@/lib/logger';
 
 /** `run` が失敗したら `name` の error ログを出し、同じエラーを投げ直す（日付などの健康データはログに出さない） */
@@ -31,5 +37,19 @@ export function loadDaySummaries(input: { requestId: string }): DaySummary[] {
 export function loadDayDetail(input: { wakeDate: string; requestId: string }): DayDetail {
   return logFailure('sleepRecord.loadDetail', input.requestId, () =>
     buildDayDetail(findSessionsByWakeDate(input.wakeDate), input.wakeDate),
+  );
+}
+
+/**
+ * 帰属日が `fromWakeDate`〜`toWakeDate`（両端を含む）の主睡眠を、ステージ区間つきで帰属日の古い順に返す。
+ * ステージなしの主睡眠も含める（除くのは使う側）。他機能（スマートアラームの推定）向け
+ */
+export function loadMainSleeps(input: {
+  fromWakeDate: string;
+  toWakeDate: string;
+  requestId: string;
+}): SleepSession[] {
+  return logFailure('sleepRecord.loadMainSleeps', input.requestId, () =>
+    pickMainSessions(findSessionsByWakeDateRange(input.fromWakeDate, input.toWakeDate)),
   );
 }

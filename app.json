@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "dev.suimin.app"
+      "bundleIdentifier": "dev.suimin.app",
+      "deploymentTarget": "26.0"
     },
     "android": {
       "package": "dev.suimin.app",
@@ -51,7 +52,15 @@
             "minSdkVersion": 26
           }
         }
-      ]
+      ],
+      [
+        "react-native-alarm-scheduler",
+        {
+          "alarmKitUsageDescription": "睡眠サイクルに合わせて起こすために、アラームを設定します。",
+          "addUseExactAlarmPermission": true
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
