@@ -1,6 +1,7 @@
 // 01 の手順14・15 の「シード S」（01 の設計書「テストリスト」手順14 の前提）と、
 // 02 の手順5 の「シード C」（02 の設計書「テストリスト」の共通の前提。S に 11/17・10/30 を足したもの）。
-// DB に入れる場合も、ネイティブのモックが返す場合も同じ睡眠になるようにする
+// DB に入れる場合も、ネイティブのモックが返す場合も同じ睡眠になるようにする。
+// 03 の「シード E」（03 の設計書「テストリスト」の共通の前提。推定の日数の判定用）もここに置く
 import type Database from 'better-sqlite3';
 
 const MIN = 60 * 1000;
@@ -128,4 +129,58 @@ export function sAndroidPage() {
     }),
     pageToken: undefined,
   };
+}
+
+/**
+ * シード E の主睡眠1回分（前日 23:00 就寝、入眠 8分）。`withCycle` ならレム期が2つ（終わり 1:00・2:35、間隔 95分）
+ */
+function eSession(wakeDate: string, withCycle: boolean): SeedSession {
+  const [y, m, d] = wakeDate.split('-').map(Number);
+  const prev = new Date(Date.UTC(y, m - 1, d - 1));
+  const bed = `${prev.toISOString().slice(0, 10)}T23:00`;
+  const stages: [Stage, number][] = withCycle
+    ? [
+        ['awake', 8],
+        ['light', 82],
+        ['rem', 30],
+        ['deep', 60],
+        ['light', 5],
+        ['rem', 30],
+        ['light', 205],
+      ]
+    : [
+        ['awake', 8],
+        ['light', 82],
+        ['rem', 30],
+        ['deep', 60],
+        ['light', 240],
+      ];
+  const asleep = stages.filter(([st]) => st !== 'awake').reduce((sum, [, min]) => sum + min, 0);
+  return [`e-${wakeDate}`, bed, wakeDate, asleep, stages];
+}
+
+/** シード E の帰属日（`2026-10-29`〜`2026-11-12`）と、サイクル値があるか */
+function eDates(): [string, boolean][] {
+  const list: [string, boolean][] = [
+    ['2026-10-29', true],
+    ['2026-10-30', true],
+  ];
+  for (let day = 31; day <= 43; day += 1) {
+    const date = new Date(Date.UTC(2026, 9, day)).toISOString().slice(0, 10);
+    list.push([date, date !== '2026-11-12']);
+  }
+  return list;
+}
+
+/**
+ * シード E を DB に入れる（今日 `2026-11-28` の範囲 `10-30`〜`11-28` で、入眠の値が14日・サイクル長の値が13日。
+ * `10-29` は範囲の外で、数えるとサイクル長が14日になる）。`withToday` なら帰属日 `11-28` のサイクル値ありの主睡眠も足す
+ */
+export function seedE(sqlite: Database.Database, opts: { withToday?: boolean } = {}): void {
+  const dates = eDates();
+  if (opts.withToday === true) dates.push(['2026-11-28', true]);
+  seedSessions(
+    sqlite,
+    dates.map(([date, withCycle]) => eSession(date, withCycle)),
+  );
 }

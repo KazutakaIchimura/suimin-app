@@ -15,11 +15,7 @@ const BREAKDOWN_ORDER: readonly Stage[] = ['deep', 'light', 'rem', 'awake', 'uns
 
 /** 日ごとの要約一覧（帰属日の新しい順。睡眠のない日は含まない） */
 export function buildDaySummaries(sessions: SleepSessionSummary[]): DaySummary[] {
-  const byDate = new Map<string, SleepSessionSummary[]>();
-  for (const session of sessions) {
-    byDate.set(session.wakeDate, [...(byDate.get(session.wakeDate) ?? []), session]);
-  }
-  return [...byDate]
+  return [...groupByWakeDate(sessions)]
     .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
     .map(([wakeDate, list]) => {
       const { main, naps } = splitMain(list);
@@ -33,12 +29,31 @@ export function buildDaySummaries(sessions: SleepSessionSummary[]): DaySummary[]
     });
 }
 
+/**
+ * 帰属日ごとの主睡眠だけを、帰属日の古い順に返す（ステージ区間はそのまま）。
+ * 他機能（スマートアラームの推定。設計書 03 の 3.3）が使う。主睡眠の決め方は `splitMain` の1か所に保つ
+ */
+export function pickMainSessions(sessions: SleepSession[]): SleepSession[] {
+  return [...groupByWakeDate(sessions)]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([, list]) => splitMain(list).main);
+}
+
 /** 指定した帰属日の詳細（主睡眠・ステージ内訳・昼寝）を作る */
 export function buildDayDetail(sessions: SleepSession[], wakeDate: string): DayDetail {
   const sameDay = sessions.filter((s) => s.wakeDate === wakeDate);
   if (sameDay.length === 0) return { kind: 'none' };
   const { main, naps } = splitMain(sameDay);
   return { kind: 'found', main, breakdown: main.hasStages ? buildBreakdown(main) : null, naps };
+}
+
+/** 睡眠を帰属日ごとにまとめる（並び順は決めない） */
+function groupByWakeDate<S extends SleepSessionSummary>(sessions: S[]): Map<string, S[]> {
+  const byDate = new Map<string, S[]>();
+  for (const session of sessions) {
+    byDate.set(session.wakeDate, [...(byDate.get(session.wakeDate) ?? []), session]);
+  }
+  return byDate;
 }
 
 /**

@@ -1,5 +1,5 @@
 // 睡眠記録の DB の読み書き（設計書 3.1「DB の入れ替え」・3.2）
-import { and, asc, eq, gt, gte, inArray, lt, or } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, lt, lte, or } from 'drizzle-orm';
 
 import {
   sleepSessions,
@@ -83,9 +83,28 @@ export function listSessions(): SleepSessionSummary[] {
 
 /** 帰属日を指定した睡眠とステージ区間（区間は開始の早い順） */
 export function findSessionsByWakeDate(wakeDate: string): SleepSession[] {
-  const db = getDb();
-  const rows = db.select().from(sleepSessions).where(eq(sleepSessions.wakeDate, wakeDate)).all();
+  const rows = getDb()
+    .select()
+    .from(sleepSessions)
+    .where(eq(sleepSessions.wakeDate, wakeDate))
+    .all();
+  return withStages(rows);
+}
+
+/** 帰属日が `from`〜`to`（両端を含む。`YYYY-MM-DD`）の睡眠とステージ区間（区間は開始の早い順） */
+export function findSessionsByWakeDateRange(from: string, to: string): SleepSession[] {
+  const rows = getDb()
+    .select()
+    .from(sleepSessions)
+    .where(and(gte(sleepSessions.wakeDate, from), lte(sleepSessions.wakeDate, to)))
+    .all();
+  return withStages(rows);
+}
+
+/** 睡眠の行に、そのステージ区間（開始の早い順）を付ける */
+function withStages(rows: (typeof sleepSessions.$inferSelect)[]): SleepSession[] {
   if (rows.length === 0) return [];
+  const db = getDb();
   const stages = db
     .select()
     .from(sleepStages)

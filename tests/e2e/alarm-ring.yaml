@@ -1,0 +1,44 @@
+# E6 アラームが鳴り、停止・スヌーズで止める（03 の設計書のテストリスト T152）。
+# 画面はロックしない（ロック中の全画面表示は実機で目で確かめる）。時刻ピッカーの操作は最初の実行で確かめる（README）
+appId: dev.suimin.app
+tags:
+  - android
+onFlowStart:
+  - runFlow:
+      file: subflows/seed.yaml
+      env:
+        SEED: 数日分
+  - runFlow:
+      file: subflows/reset-app.yaml
+      env:
+        READ_SLEEP: allow
+  - runFlow: subflows/clear-alarm.yaml
+onFlowComplete:
+  - runFlow: subflows/clear-alarm.yaml
+  - runFlow: subflows/restore.yaml
+---
+- tapOn: アラーム 未設定
+- runFlow: subflows/set-ring-in-two-minutes.yaml
+# 鳴るまで待つ（分の切り替わり直前に入れると最大3分近くかかる）
+- extendedWaitUntil:
+    visible: 停止
+    timeout: 180000
+- tapOn: 停止
+# アプリを開き直し（データは消さない）、次のアラームがなくなったことを確かめる。
+# 落ちたら設計書 3.6（鳴ったあとの予定の phase）の確かめの結果として扱い、止めて相談する
+- launchApp:
+    stopApp: true
+- tapOn: 'アラーム.*'
+- extendedWaitUntil:
+    visible: アラームは設定されていません
+    timeout: 30000
+# もう一度2分後で設定し、鳴ったらスヌーズ
+- runFlow: subflows/set-ring-in-two-minutes.yaml
+- extendedWaitUntil:
+    visible: スヌーズ
+    timeout: 180000
+- tapOn: スヌーズ
+- extendedWaitUntil:
+    visible: '.* にもう一度鳴ります'
+    timeout: 30000
+- assertVisible: '次のアラーム .*（スヌーズ）'

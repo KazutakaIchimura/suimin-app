@@ -6,10 +6,12 @@ module.exports = {
   // E2E のシードアプリは別の Expo プロジェクト（package.json・node_modules を持つ）なので、たどらない
   modulePathIgnorePatterns: ['<rootDir>/tests/e2e/seed/seeder-app/'],
   globalSetup: '<rootDir>/tests/setup/global-setup.js',
-  // jest-expo の既定の setupFiles に加えて、描画をネイティブで行うライブラリを差し替える（設計書 02 の 3.3）
+  // jest-expo の既定の setupFiles に加えて、描画をネイティブで行うライブラリ（設計書 02 の 3.3）と、
+  // アラーム・UUID・時刻ピッカーのライブラリ（設計書 03 の 3.3）を差し替える
   setupFiles: [
     ...require('jest-expo/jest-preset').setupFiles,
     '<rootDir>/tests/setup/native-render-mocks.js',
+    '<rootDir>/tests/setup/native-alarm-mocks.js',
   ],
   // アプリ（app.json の experiments.reactCompiler）と同じく React Compiler を通して変換する。
   // jest-expo の既定は Compiler を通さないため、本番では Compiler の最適化で起きる不具合をテストで見逃す（設計書 02 の 3.3）

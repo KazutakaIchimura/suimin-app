@@ -206,22 +206,22 @@
 | `src/features/sleep-record/sleep-record-health-ios.repository.ts` | リポジトリ | HealthKit の連携状態の取得・許可の要求・睡眠サンプルの読み取り（`queryCategorySamples` に `limit: 0` を渡して全件、読み取り期間と重なるもの）と、共通セグメントへの変換 |
 | `src/features/sleep-record/sleep-record-health-android.repository.ts` | リポジトリ | ヘルスコネクトの初期化・連携状態の取得・許可の要求・設定画面を開く・SleepSession の読み取り（`pageToken` で全ページ。`pageToken` がない・空文字なら打ち切る）と、共通セグメントへの変換 |
 | `src/features/sleep-record/sleep-record-health.repository.ts` | リポジトリ | 引数の `os` で iOS／Android の実装を選び、同じ形の関数を返す（`react-native` は import しない） |
-| `src/features/sleep-record/sleep-record.repository.ts` | リポジトリ | `@/lib/db` から DB を取得して読み書きする：睡眠の入れ替え（3.1 の削除条件・挿入・同期記録の更新を1トランザクション）、同期記録の読み取り、日ごとの睡眠の取得、帰属日を指定した睡眠とステージ区間の取得、睡眠の有無 |
+| `src/features/sleep-record/sleep-record.repository.ts` | リポジトリ | `@/lib/db` から DB を取得して読み書きする：睡眠の入れ替え（3.1 の削除条件・挿入・同期記録の更新を1トランザクション）、同期記録の読み取り、日ごとの睡眠の取得、帰属日を指定した睡眠とステージ区間の取得、睡眠の有無。03 で、帰属日の範囲を指定した睡眠とステージ区間の取得（`findSessionsByWakeDateRange`）を足した |
 | `src/features/sleep-record/sleep-record-session.service.ts` | サービス（純粋） | セグメントから睡眠を組み立てる。あわせて、組み立てと同じ規則で有効なセグメントの件数を数える（`countValidSegments`。3.1 の「セグメントの件数」）（まとめる・同じ睡眠内の重なりを解消する・0分を捨てる・睡眠どうしの重なりを排除する・帰属日と睡眠時間を付ける） |
-| `src/features/sleep-record/sleep-record-day.service.ts` | サービス（純粋） | 睡眠の一覧から、日ごとの要約（一覧用）と1日の詳細（主睡眠・昼寝・ステージ内訳）を作る |
+| `src/features/sleep-record/sleep-record-day.service.ts` | サービス（純粋） | 睡眠の一覧から、日ごとの要約（一覧用）と1日の詳細（主睡眠・昼寝・ステージ内訳）を作る。03 で、帰属日ごとの主睡眠だけを返す `pickMainSessions` を足した |
 | `src/features/sleep-record/sleep-record-date.service.ts` | サービス（純粋） | 詳細画面の日付パラメータを検証し、正しい帰属日（`YYYY-MM-DD`）か不正かを返す |
 | `src/features/sleep-record/sleep-record-guide.service.ts` | サービス（純粋） | 連携状態・OS・睡眠の有無・同期中か・同期失敗の有無から、表示する案内の一覧を決める |
 | `src/features/sleep-record/sleep-record-format.service.ts` | サービス（純粋） | 表示用の整形（分→「7時間32分」、時刻→「23:14」、日付→「11月25日（水）」）。02 で、期間の見出し・軸の分の時刻・グラフの日付の文字・日ごとのボタンの読み上げの説明を追加（`docs/features/02_sleep-chart.md`） |
 | `src/features/sleep-record/sleep-record-sync-range.service.ts` | サービス（純粋） | 取り込み範囲（開始・ヘルスケアの読み取り開始）の計算と、起床時刻による採用の判定 |
 | `src/features/sleep-record/sleep-record-sync.service.ts` | サービス | 同期の実行（範囲の計算 → ヘルスケアの読み取り → 組み立て → DB の入れ替え）。`os`・`requestId`・現在時刻を返す関数 `getNow`（受け口層が `@/lib/clock` を渡す）を引数で受け取る。同期開始時刻とログの `ms` は `getNow` で測る |
 | `src/features/sleep-record/sleep-record-access.service.ts` | サービス | 連携状態の取得・許可の要求・設定を開く、の窓口（失敗はログを出して投げ直す） |
-| `src/features/sleep-record/sleep-record-query.service.ts` | サービス | 画面用の読み取りの窓口（日ごとの要約一覧・1日の詳細）。他機能（スマートアラーム）が過去の主睡眠を使うときもここを呼ぶ |
+| `src/features/sleep-record/sleep-record-query.service.ts` | サービス | 画面用の読み取りの窓口（日ごとの要約一覧・1日の詳細）。他機能（スマートアラーム）が過去の主睡眠を使うときもここを呼ぶ。03 で、帰属日の範囲の主睡眠（ステージ区間つき、ステージなしも含む）を返す `loadMainSleeps` を足した（失敗は `sleepRecord.loadMainSleeps` の error ログ） |
 | `src/features/sleep-record/sleep-record.store.ts` | 受け口 | 画面をまたいで共有する状態（連携状態・同期中か（`sync()` の実行中）・最後の同期エラー・許可の要求中か・許可の要求／設定を開くの失敗・データの版番号）と、その操作（`refreshAccess`・`sync`・`requestAccess`・`openSettings`）。サービスを呼び、届いたエラーを画面の状態にする。同期中の重複実行を防ぐ。`Platform.OS` を読み、操作ごとに `requestId` を作ってサービスに渡す |
 | `src/features/sleep-record/use-sleep-record-sync.ts` | 受け口 | 起動時・前面復帰時（`AppState`）に store の `sync()` を呼ぶ |
 | `src/features/sleep-record/sleep-record-sync-provider.tsx` | 受け口 | `use-sleep-record-sync` を1回だけ動かすコンポーネント。`src/app/_layout.tsx` が子要素を包んで描画する。起動時の同期は睡眠記録の業務なので `src/lib/` ではなく機能フォルダに置き、`src/app/` は画面コンポーネントと同じく描画するだけにする |
 | `src/features/sleep-record/use-sleep-record-list.ts` | 受け口 | store の連携状態と DB の睡眠から、案内・日ごとの要約一覧を画面用の状態にする。表示用の整形（整形サービス。「今年」の判定に使う現在日は `@/lib/clock` から渡す）もここで呼び、画面には整形済みの文字列を渡す。版番号が変わったら読み直す。`Platform.OS` を読み、`requestId` を作ってサービスに渡す。画面の移動の関数（行のタップで詳細へ移る `openDay`、02 で足した `openChart`）を返す（architecture.md「画面の移動はフックから」） |
 | `src/features/sleep-record/use-sleep-record-detail.ts` | 受け口 | 日付パラメータを検証（日付の検証サービス）し、指定日の詳細を整形済みの画面用の状態にする。版番号が変わったら読み直す。`requestId` を作ってサービスに渡す |
-| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。上部の「週・月の推移」ボタン（02 で追加。フックの `openChart` を呼ぶ）・案内・同期エラー・読み取りエラー・日ごとの行（タップでフックの `openDay` を呼び、詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新 |
+| `src/features/sleep-record/sleep-record-list-screen.tsx` | 受け口 | 一覧画面。上部の「週・月の推移」ボタン（02 で追加。フックの `openChart` を呼ぶ）・案内・同期エラー・読み取りエラー・日ごとの行（タップでフックの `openDay` を呼び、詳細へ。各行の要素に `testID` `sleep-record-row` を付ける。中間テストと E2E が行を数え・選ぶのに使う）・下に引いて更新。03 で、一覧（`FlatList`）の外の上に外から渡す部品を置く `header`（省略可。「読み込み中」の間も出す）を足した |
 | `src/features/sleep-record/sleep-record-detail-screen.tsx` | 受け口 | 詳細画面。主睡眠・ステージ内訳・昼寝の一覧・日付不正／データなし／読み取りエラーの表示 |
 | `src/features/sleep-record/sleep-record-access-guide.tsx` | 受け口 | 連携状態に応じた案内文とボタン。一覧画面の部品で、表示する案内と押したときの操作を props で受け取る（サービス・store を直接呼ばない） |
 
@@ -495,7 +495,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 - 90日より古いデータの削除（DB に貯めたものは消さない）
 - 取り込み範囲より前の睡眠の、ヘルスケア側での修正・削除の反映（ただし、範囲内で今回読んだ睡眠と同じ `id`・時間が重なるものは、入れ替えで消える）
 - ヘルスケア側で取り込み範囲の睡眠を全部消した場合の反映（0件のときは入れ替えないため）
-- 他機能（スマートアラーム）向けの「過去の主睡眠を返す」関数。スマートアラームの設計で `sleep-record-query.service.ts` に追加する
+- 他機能（スマートアラーム）向けの「過去の主睡眠を返す」関数。スマートアラームの設計で `sleep-record-query.service.ts` に追加する（03 で `loadMainSleeps` として追加済み。`docs/features/03_smart-alarm.md`）
 - 心拍・呼吸数など睡眠ステージ以外のデータ
 - 旅行などでタイムゾーンが変わったときの帰属日の再計算（保存時のタイムゾーンで付けた帰属日を使い続ける）
 - 一覧のページ送り（表示件数が増えても全件を表示する）
@@ -790,7 +790,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | T148 | 同上 | 1行目をタップ（手順15で詳細のルートを作ってから足す） | 詳細の URL が `/sleep/2026-11-25` になり、S の詳細が出る | I4-1 |
 | T149 | `@/drizzle/migrations` を、T131 と同じ壊れた SQL のマイグレーション1件に差し替える。その `when` は本物の最後のマイグレーションより新しくする（手順14 のテスト用DBは適用済みなので、古いとスキップされて失敗が起きないため） | `/` を開く | 「データベースの準備に失敗しました」が出て、`queryCategorySamples`・連携状態の取得関数が呼ばれない | I4-11b |
 | T150 | iOS `notRequested`、要求成功後は `ready`、DB 空、モックはシード S を返す | 「ヘルスケアと連携する」を押す | `requestAuthorization` が1回呼ばれ、同期して S の一覧が出る 。Android（`notGranted`、許可後は `ready`）でも「ヘルスコネクトと連携する」を押すと `requestPermission` が1回呼ばれ、S の一覧が出る | I4-2 |
-| T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン（02 で一覧の上に足した「週・月の推移」ボタンは数えない） | I4-2 |
+| T151 | iOS `unavailable`／Android `unavailable`・`updateRequired`・`notGranted`（`it.each`） | 一覧を開く | 3.1 の表どおりの案内文とボタン（02 で一覧の上に足した「週・月の推移」ボタンと、03 で足したアラームの入口は数えない） | I4-2 |
 | T152 | Android `notGranted`、要求後も `notGranted` | 「ヘルスコネクトと連携する」を押す | 案内は `notGranted` のまま、`readRecords` が呼ばれない | I4-2b |
 | T153 | Android `notGranted` | 設定を開くボタンを押す | `openHealthConnectSettings` が1回呼ばれる | I4-2b |
 | T154 | `openHealthConnectSettings` が1回目は例外、2回目は保留 | 押す → もう一度押す | 1回目のあと「ヘルスコネクトの設定を開けませんでした。設定アプリからヘルスコネクトを開いてください」が出る。2回目を押すと、保留中のうちに表示が消える | I4-2b |
@@ -805,7 +805,7 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 | T162 | DB にシード S。一覧画面のコンポーネントを `renderRouter` を通さず直接描画する（マイグレーションはテスト用DBの補助で適用済みのため `MigrationGate` を通さない）。描画の前に連携状態を `notRequested` で取得済みにし（同期が走らない）、テスト用DBを閉じる | 描画 → DB を開き直して「再試行」 | 「睡眠データを読み込めませんでした」と「再試行」、`sleepRecord.loadList` の error ログ。押すと S の一覧が出る | I4-9 |
 | T163 | Android `notGranted`、DB にシード S | 一覧を開き、1行目をタップ | 「ヘルスコネクトと連携する」ボタン・「許可しなかった場合は、ヘルスコネクトの設定から許可してください」・設定を開くボタンと一緒に S の一覧が出て、タップで S の詳細が出る | I4-13 |
 | T164 | `ready`、DB 空、読み取りを保留（解くとシード S を返す） | 一覧を開く → 保留を解く | 保留中は「睡眠データを取り込んでいます」が出て「睡眠データがありません」は出ない。解くと S の一覧が出る | I4-16 |
-| T165 | 連携状態の取得を保留 | 一覧を開く | 「読み込み中」だけが出て、案内・空の表示は出ない | I4-16 |
+| T165 | 連携状態の取得を保留 | 一覧を開く | 「読み込み中」と、03 で足したアラームの入口だけが出て、案内・空の表示は出ない（03 の T099 で直した） | I4-16 |
 | T180 | iOS。`getRequestStatusForAuthorization` は `shouldRequest` を返す（起動時の同期の中の取得で `notRequested` になり、同期は走らない）。DB にシード S | `renderRouter` で一覧を開き、`findBy*` で待ったあとの表示を見る | 「ヘルスケアと連携する」ボタンと S の一覧が出て、「読み込み中」と「睡眠データがありません」は出ていない（一覧が「DB を読んでいる間」の表示の状態を持たないことは、DB の読み取りが同期関数で、RNTL 14 の `await render` が読み取りの完了まで待つため外から見られない。I4-16 の注記のとおり、テストでは確かめず impl レビューでコードを確かめる。連携状態の取得中の「読み込み中」は T165 で確かめる） | I4-16 |
 | T184 | 一覧が出たあと、2回目の連携状態の取得（`getRequestStatusForAuthorization`）を保留 | `background`→`active` にし、保留中の表示を見てから保留を解く | 保留中も T147 と同じ行が出たままで、「読み込み中」・案内は出ない | I4-16 |
 | T166 | DB にシード S。一覧が出たあと、読み取りを保留 | `background`→`active`／下に引く（2ケース） | どちらも保留の間、S の一覧が出たままで「読み込み中」が出ない（同期成功のあとの読み直しは better-sqlite3 で同期的に終わり、間を外から見られないため、このリストでは T174 の内容の更新で確かめ、読み直しの間に「読み込み中」を出さないことは impl レビューでコードを確かめる） | I4-16 |
@@ -871,3 +871,4 @@ Maestro にはパソコン側でコマンド（adb など）を実行する命�
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
 - 2026-11-26 02（週・月の推移のグラフ）のため、一覧画面の上に「週・月の推移」ボタンを追加し、整形サービスに関数を追加（詳細は `docs/features/02_sleep-chart.md`）
 - 2026-11-28 画面の移動をフックから呼ぶ決まり（architecture.md）に合わせ、一覧の行のタップの移動を一覧のフックの `openDay` に移した（動きは変えない。02 の PR #2 のレビューで人間が判断）
+- 2026-11-28 03（スマートアラーム）のため、読み取りの窓口に `loadMainSleeps`、リポジトリに `findSessionsByWakeDateRange`、日ごとのサービスに `pickMainSessions` を追加し、一覧画面に外から渡す部品の枠 `header` を足した（T151・T165 の期待結果も直した。詳細は `docs/features/03_smart-alarm.md`）

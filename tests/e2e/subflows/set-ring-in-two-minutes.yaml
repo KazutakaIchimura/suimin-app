@@ -1,0 +1,26 @@
+# アラームの画面で、起きたい時刻を「今から2分後」にして「希望の時刻」の候補を押す（03 の E6）。
+# Android の時刻ピッカーをキーボード入力に切り替えて入れる。切り替えのボタン・入力欄・OK の文字は最初の実行で確かめる（README）
+appId: dev.suimin.app
+---
+- runScript:
+    file: ../seed/sleep-seed.js
+    env:
+      SEED: 数日分
+- tapOn: '起きたい時刻 .*'
+- tapOn:
+    id: 'android:id/toggle_mode'
+- tapOn:
+    id: 'android:id/input_hour'
+- eraseText
+- inputText: ${output.ringHour}
+- tapOn:
+    id: 'android:id/input_minute'
+- eraseText
+- inputText: ${output.ringMinute}
+- tapOn: OK
+- tapOn: '${output.ringLabel}.*'
+- runFlow:
+    when:
+      visible: 許可
+    commands:
+      - tapOn: 許可

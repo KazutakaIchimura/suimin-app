@@ -150,7 +150,7 @@ it('Android の notGranted で「ヘルスコネクトと連携する」を押�
   expect(app.hc.requestPermission).toHaveBeenCalledTimes(1);
 });
 
-// T151（02 の T043 で直した）
+// T151（02 の T043・03 の T092 で直した）
 it.each([
   ['ios', 'unavailable', ['この端末ではヘルスケア連携を使えません'], []],
   ['android', 'unavailable', ['この端末ではヘルスケア連携を使えません'], []],
@@ -173,10 +173,14 @@ it.each([
     await app.open();
 
     for (const text of texts) expect(await app.screen.findByText(text)).toBeOnTheScreen();
-    // どの状態でも一覧を表示しているので、02 で足した「週・月の推移」ボタンも出る（02 の T043）
+    // どの状態でも一覧を表示しているので、02 で足した「週・月の推移」ボタンも出る（02 の T043）。
+    // 03 で足したアラームの入口（予約なしの既定では「アラーム 未設定」）も出る（03 の T092）
     const chartEntry = app.screen.getByRole('button', { name: '週・月の推移' });
-    // ボタンは表のものだけ（数と名前が一致）。「週・月の推移」ボタンは数えない
-    const guideButtons = app.screen.queryAllByRole('button').filter((b) => b !== chartEntry);
+    const alarmEntry = await app.screen.findByRole('button', { name: 'アラーム 未設定' });
+    // ボタンは表のものだけ（数と名前が一致）。「週・月の推移」とアラームの入口は数えない
+    const guideButtons = app.screen
+      .queryAllByRole('button')
+      .filter((b) => b !== chartEntry && b !== alarmEntry);
     expect(guideButtons).toHaveLength(buttons.length);
     for (const name of buttons) expect(app.screen.getByRole('button', { name })).toBeOnTheScreen();
     expect(app.screen.queryByText(/睡眠データがありません/)).toBeNull();
@@ -476,8 +480,8 @@ it('ready で DB が空のまま初回同期の途中なら「取り込んでい
   expect(app.screen.queryByText('睡眠データを取り込んでいます')).toBeNull();
 });
 
-// T165
-it('連携状態の取得中は「読み込み中」だけが出る', async () => {
+// T165（03 の T099 で直した：「読み込み中」の間もアラームの入口は出る）
+it('連携状態の取得中は「読み込み中」と、アラームの入口だけが出る', async () => {
   const app = load();
   seedS(mockTestDb.sqlite);
   const status = deferred<number>();
@@ -487,7 +491,10 @@ it('連携状態の取得中は「読み込み中」だけが出る', async () =
 
   expect(await app.screen.findByText('読み込み中')).toBeOnTheScreen();
   expect(app.screen.queryAllByTestId('sleep-record-row')).toEqual([]);
-  expect(app.screen.queryAllByRole('button')).toEqual([]);
+  // ボタンは「アラーム」で始まる入口の1つだけ
+  const buttons = app.screen.queryAllByRole('button');
+  expect(buttons).toHaveLength(1);
+  expect(buttons[0]).toHaveTextContent(/^アラーム/);
   expect(app.screen.queryByText(/睡眠データがありません/)).toBeNull();
   status.resolve(1);
 });
@@ -644,4 +651,98 @@ it('一覧の読み取りに失敗したときは「週・月の推移」ボタ�
   expect(await app.screen.findByText('睡眠データを読み込めませんでした')).toBeOnTheScreen();
   expect(app.screen.queryByRole('button', { name: CHART_ENTRY })).toBeNull();
   mockTestDb.reopen();
+});
+
+// ---- 03 スマートアラーム：一覧の上の枠（設計書 docs/features/03_smart-alarm.md の I4） ----
+const ALARM_ENTRY = 'アラーム 未設定';
+
+// 03 の T090
+it('アラームの入口が「週・月の推移」より上に出る', async () => {
+  const app = load();
+  seedS(mockTestDb.sqlite);
+
+  await app.open();
+
+  await expectSList(app);
+  const entry = await app.screen.findByRole('button', { name: ALARM_ENTRY });
+  const buttons = app.screen.getAllByRole('button');
+  expect(buttons.indexOf(entry)).toBeLessThan(
+    buttons.indexOf(app.screen.getByRole('button', { name: CHART_ENTRY })),
+  );
+});
+
+// 03 の T091
+it('一覧の「読み込み中」の間も、入口が「読み込み中」より上に出る', async () => {
+  const app = load();
+  const status = deferred<number>();
+  app.hk.getRequestStatusForAuthorization.mockReturnValueOnce(status.promise as never);
+
+  await app.open();
+
+  expect(await app.screen.findByText('読み込み中')).toBeOnTheScreen();
+  expect(await app.screen.findByRole('button', { name: ALARM_ENTRY })).toBeOnTheScreen();
+  // 要素の順：画面の文字を出てくる順に並べると、入口の文字が「読み込み中」より前
+  const texts = app.screen.queryAllByText(/.+/).map((t) => t.props.children);
+  expect(texts.indexOf(ALARM_ENTRY)).toBeGreaterThanOrEqual(0);
+  expect(texts.indexOf(ALARM_ENTRY)).toBeLessThan(texts.indexOf('読み込み中'));
+
+  // 「読み込み中」から一覧に変わる前と後で、予定の読み取りの回数が増えない（入口が作り直されない）
+  const reads = app.alarm.alarmMock().getAlarmOccurrencesAsync;
+  await app.rntl.waitFor(() => expect(reads).toHaveBeenCalled());
+  const before = reads.mock.calls.length;
+  await app.rntl.act(async () => status.resolve(1));
+  expect(await app.screen.findByTestId('sleep-record-list')).toBeOnTheScreen();
+  expect(reads).toHaveBeenCalledTimes(before);
+});
+
+// 03 の T091
+it('一覧の読み取りに失敗しても、入口が出る', async () => {
+  const app = load();
+  app.hk.getRequestStatusForAuthorization.mockResolvedValue(1 as never); // shouldRequest
+  await app.store.getState().refreshAccess();
+  mockTestDb.close();
+  const { createElement } = require('react') as typeof import('react');
+  const { SleepRecordListScreen } =
+    require('@/features/sleep-record/sleep-record-list-screen') as typeof import('@/features/sleep-record/sleep-record-list-screen');
+  const { SmartAlarmEntry } =
+    require('@/features/smart-alarm/smart-alarm-entry') as typeof import('@/features/smart-alarm/smart-alarm-entry');
+  const { render } =
+    require('@testing-library/react-native') as typeof import('@testing-library/react-native');
+
+  await render(createElement(SleepRecordListScreen, { header: createElement(SmartAlarmEntry) }));
+
+  expect(await app.screen.findByText('睡眠データを読み込めませんでした')).toBeOnTheScreen();
+  expect(await app.screen.findByRole('button', { name: ALARM_ENTRY })).toBeOnTheScreen();
+  mockTestDb.reopen();
+});
+
+// 03 の T091
+it('連携状態の案内が出ているときも、入口が出る', async () => {
+  const app = load('android');
+  app.hc.getGrantedPermissions.mockResolvedValue([]);
+
+  await app.open();
+
+  expect(
+    await app.screen.findByText('許可しなかった場合は、ヘルスコネクトの設定から許可してください'),
+  ).toBeOnTheScreen();
+  expect(await app.screen.findByRole('button', { name: ALARM_ENTRY })).toBeOnTheScreen();
+});
+
+// 03 の T097
+it('一覧の部品を header なしで描画すると、今の表示のまま（入口は出ない）', async () => {
+  const app = load();
+  seedS(mockTestDb.sqlite);
+  await app.store.getState().refreshAccess();
+  const { createElement } = require('react') as typeof import('react');
+  const { SleepRecordListScreen } =
+    require('@/features/sleep-record/sleep-record-list-screen') as typeof import('@/features/sleep-record/sleep-record-list-screen');
+  const { render } =
+    require('@testing-library/react-native') as typeof import('@testing-library/react-native');
+
+  await render(createElement(SleepRecordListScreen));
+
+  await expectSList(app);
+  expect(app.screen.getByRole('button', { name: CHART_ENTRY })).toBeOnTheScreen();
+  expect(app.screen.queryByRole('button', { name: /^アラーム/ })).toBeNull();
 });

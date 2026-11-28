@@ -14,7 +14,7 @@ var WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 var SEED_DAYS = {
   睡眠なし: [],
   数日分: [1, 2, 3],
-  // 今回のフローでは使わない。スマートアラームの推定（testing.md の「推定に足りる日数」）のために置いておく
+  // スマートアラームの推定（testing.md の「推定に足りる日数」）。03 の E5 で使う
   '14日分': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
 };
 
@@ -140,6 +140,38 @@ function expectedChart(name, now) {
   return result;
 }
 
+/**
+ * スマートアラームの画面（03）の使う値の説明。推定の規則（03 の設計書 3.1）を、このシードの形に合わせて写したもの：
+ * どの日も深い睡眠から始まるので入眠は 0分、レムは1晩に1回なのでサイクル長の値はない。
+ * 実行日の29日前〜今日に入る日（シードの日はすべて1〜14日前）の数で、実績か標準値かを決める
+ */
+function expectedAlarmParams(name) {
+  var days = SEED_DAYS[name].filter(function (d) {
+    return d <= 29;
+  }).length;
+  var required = 14;
+  var onset =
+    days >= required
+      ? '入眠 0分（あなたの記録）'
+      : '入眠 14分（標準値。あと ' + (required - days) + '日分の記録で切り替わります）';
+  return onset + '・1サイクル 90分（標準値。あと 14日分の記録で切り替わります）';
+}
+
+/**
+ * 03 の E6：起きたい時刻を「今から2分後」にするための時と分（日本時間）と、希望の時刻のボタンの先頭の文字「H:MM 希望の時刻」
+ */
+function expectedRingTime(now) {
+  var target = new Date(now + 2 * MINUTE_MS + JST_OFFSET_MS);
+  var hour = target.getUTCHours();
+  var minute = target.getUTCMinutes();
+  var hhmm = hour + ':' + (minute < 10 ? '0' : '') + minute;
+  return {
+    hour: String(hour),
+    minute: (minute < 10 ? '0' : '') + minute,
+    label: hhmm + ' 希望の時刻',
+  };
+}
+
 // Maestro の runScript から使うとき：環境変数 SEED の最新日の表示文字列を output に入れる
 if (typeof output !== 'undefined' && typeof SEED !== 'undefined') {
   var expected = expectedLatest(SEED, Date.now());
@@ -154,6 +186,11 @@ if (typeof output !== 'undefined' && typeof SEED !== 'undefined') {
   // Maestro のフローの条件で使うため文字列にする
   output.latestInThisWeek = chart.latestInThisWeek ? 'true' : 'false';
   output.latestDayLabel = chart.latestDayLabel;
+  output.alarmParams = expectedAlarmParams(SEED);
+  var ring = expectedRingTime(Date.now());
+  output.ringHour = ring.hour;
+  output.ringMinute = ring.minute;
+  output.ringLabel = ring.label;
 }
 
 // シードアプリ（Node・Metro）から使うとき
@@ -162,6 +199,8 @@ if (typeof module !== 'undefined') {
     buildSeed: buildSeed,
     expectedLatest: expectedLatest,
     expectedChart: expectedChart,
+    expectedAlarmParams: expectedAlarmParams,
+    expectedRingTime: expectedRingTime,
     SEED_NAMES: Object.keys(SEED_DAYS),
   };
 }
