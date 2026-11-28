@@ -104,6 +104,8 @@
 | 上以外 | する | なし |
 
 - 許可の結果の値のうち、`status`・`canScheduleExactAlarms`・`canOpenSettings` はライブラリの型で必ずある（省略できない）。`canUseFullScreenIntent`・`canPostNotifications` は省略できる（ライブラリの型の説明：Android 以外では常に真）ので、省略は真とみなす
+- スヌーズの処理（起動時・前面復帰・操作のイベント・再試行）は重ねて走ることを止めない（二重の延期は `idempotencyKey` で防げる。表示があとから上書きされることはありうるが、再試行すればスヌーズ済みの経路で直る。impl レビューで割り切りとした）
+- 設定・解除の処理中にもう一度呼ばれたら（ボタンを押せなくする前に続けて押した場合）、store は何もしない（新旧のアラームが互いを取り消して0件になるのを防ぐ。impl レビューで足した）
 - 「設定を開く」が失敗したら（例外・偽を返す）「設定を開けませんでした」を出す（続けて失敗しても1つだけ。同じ文言は重ねない）。どちらも `smartAlarm.openSettings` の error ログを出す（例外は `err`、偽は `err` の代わりに `opened: false`）。例外はログのあと投げ直し、受け口層が文言にする
 - Android の正確なアラームの権限は、目覚ましのアプリなので `USE_EXACT_ALARM`（インストール時に与えられる）を設定プラグインで有効にする。`SCHEDULE_EXACT_ALARM` も残す（ライブラリの既定）。それでも許可がない（利用者が取り消した）ときは上の表のとおり案内する
 - 通知の許可（Android 13 以降の `canPostNotifications`）は案内に使わない（鳴動は常駐サービスと全画面表示で行い、通知の許可がなくても鳴る（ライブラリの説明）。実機で確かめる。3.6）
@@ -129,7 +131,7 @@
 - 理由の読み取りが失敗したら（例外）、`smartAlarm.snooze` の error ログを出し、画面は移らず、何も表示しない（スヌーズかどうか分からないため）。次の前面復帰でまた読む
 - 古い理由は捨てる：理由の `timestamp`（押した時刻）が今より **10分**以上前なら、スヌーズせずに理由を消す（鳴動が終わったあとの、関係のない時刻にスヌーズしないため。Android の鳴動は5分で止まり、iOS でも押してから10分たってアプリを開くのはスヌーズの意図ではないとみなす。境目：9分59.999秒前は処理する、10分ちょうど前は捨てる）。今より後の時刻（端末の時計のずれ）は新しい理由として処理する
 - 理由の `action` が `secondaryOpen`（スヌーズのボタン）で、`trigger` が `true` でないなら（ライブラリの型の説明：`trigger` は Android で鳴り始めたときに記録される理由に付く。押していないのにスヌーズしないため）
-  1. 鳴っている鳴動の ID を、`getCurrentAlarmContextAsync` の `occurrenceId` から取る。`null` のとき、`occurrenceId` がないとき、文脈の `id` が理由の `alarmId` と違うときは「取れない」とみなす。取れなければ、鳴動の予定（`getAlarmOccurrencesAsync(理由の alarmId)`）のうち `phase` が `ringing` のものの `occurrenceId`。`getCurrentAlarmContextAsync` が例外を投げたら予定に回さず失敗とする（ライブラリが使えない状態なので）。どちらでも取れないとき、そのアラームに `scheduled` の `deferred` の予定がすでにあれば、スヌーズ済み（前の処理の延期は成功したが理由の消去に失敗した）とみなし、延期を呼ばずにその予定の時刻をスヌーズの結果として返す（実装の impl レビューで足した）。それもなければ失敗とする（理由の型には鳴動の ID がないため。アラームの ID に戻すと、2回目以降のスヌーズで `idempotencyKey` が前回と同じになり、次の鳴動が予約されないおそれがある）
+  1. 鳴っている鳴動の ID を、`getCurrentAlarmContextAsync` の `occurrenceId` から取る。`null` のとき、`occurrenceId` がないとき、文脈の `id` が理由の `alarmId` と違うとき、文脈の `state` が鳴っている（`alerting`。省略は鳴っているとみなす）以外のとき（`countdown` など。スヌーズ済みでまだ鳴っていない鳴動を延期し直さないため。impl レビューで足した）は「取れない」とみなす。取れなければ、鳴動の予定（`getAlarmOccurrencesAsync(理由の alarmId)`）のうち `phase` が `ringing` のものの `occurrenceId`。`getCurrentAlarmContextAsync` が例外を投げたら予定に回さず失敗とする（ライブラリが使えない状態なので）。どちらでも取れないとき、そのアラームに `scheduled` の `deferred` の予定がすでにあれば、スヌーズ済み（前の処理の延期は成功したが理由の消去に失敗した）とみなし、延期を呼ばずにその予定の時刻をスヌーズの結果として返す（実装の impl レビューで足した）。それもなければ失敗とする（理由の型には鳴動の ID がないため。アラームの ID に戻すと、2回目以降のスヌーズで `idempotencyKey` が前回と同じになり、次の鳴動が予約されないおそれがある）
   2. その鳴動を「延期」で終わらせ、**9分後**（540秒）に次の鳴動を予約する（`resolveAlarmOccurrenceAsync`、`outcome: 'deferred'`、`next: { delaySeconds: 540, relationship: 'deferred' }`）。同じ鳴動で二重に予約しないように `idempotencyKey` に `snooze:<鳴動の ID>` を渡す
   3. 成功したら理由を消し（`clearPendingNativeAlarmHandoffAsync`）、アラームの画面へ移って「7:07 にもう一度鳴ります」を出す（前に出ていた「スヌーズを設定できませんでした」と「再試行」は消す。操作の結果は最後の1つだけ）（時刻は結果の `nextOccurrence.scheduledFor`）。結果の `status` が `resolvedWithoutNext` なら、理由を消したうえで「スヌーズを設定できませんでした」を出す（再試行は出さない。鳴動は終わっていて、やり直しても次の鳴動はできないため）
   - 再試行（下の 4）を押したときに理由が10分以上前になっていたら、理由を消し、出ていた「スヌーズを設定できませんでした」と「再試行」も消す
@@ -181,17 +183,17 @@
 | `src/features/smart-alarm/smart-alarm-candidate.service.ts` | サービス（純粋） | 使う値と時刻から、今から寝る・起床時刻を指定の候補を作る。就寝予定時刻・希望時刻の日付を決める（3.1「候補の計算」） |
 | `src/features/smart-alarm/smart-alarm-guide.service.ts` | サービス（純粋） | 許可の結果から、設定するかと案内を決める（3.1「許可」の表） |
 | `src/features/smart-alarm/smart-alarm-format.service.ts` | サービス（純粋） | 画面の文言：候補の行、使う値の説明、設定中のアラーム、成功・失敗の文言。時刻・日付・時間は 01 の `formatTime`・`formatDate`・`formatMinutes` を使う（他機能のサービス層なので参照してよい） |
-| `src/features/smart-alarm/smart-alarm.repository.ts` | リポジトリ | `react-native-alarm-scheduler` と `expo-crypto` を呼ぶ唯一のファイル。許可の取得・要求、設定を開く（2種）、1回だけのアラームの予約（ID の生成と鳴らし方の設定はここ）、全部の取り消し、予定の一覧、アプリを開いた理由の読み取り・消去、今の鳴動、スヌーズ（延期で終わらせる） |
+| `src/features/smart-alarm/smart-alarm.repository.ts` | リポジトリ | `react-native-alarm-scheduler` と `expo-crypto` を呼ぶ唯一のファイル。許可の要求（設定のたびに要求を呼ぶので、取得だけの関数は置かない）、設定を開く（2種）、1回だけのアラームの予約（ID の生成と鳴らし方の設定はここ）、全部の取り消し、予定の一覧、アプリを開いた理由の読み取り・消去、今の鳴動、スヌーズ（延期で終わらせる） |
 | `src/features/smart-alarm/smart-alarm-params.service.ts` | サービス | 使う値の窓口：推定の元データを 01 の `loadMainSleeps` で読み（範囲は今日の29日前〜今日。今は引数で受ける）、推定の純粋関数で使う値にする。失敗は 01 の窓口のログのまま投げ直す |
 | `src/features/smart-alarm/smart-alarm-operation.service.ts` | サービス | アラーム操作の窓口：許可の確認とアラームの設定、解除、設定中のアラームの読み取り、スヌーズの処理と理由の消去（`clearHandoff`）、設定を開く。ログを出す（3.5）。スヌーズの処理は、スヌーズの段階に入るときに呼ぶ関数（`onSnoozeStart`）を受け取り、store が「理由の読み取りの失敗（何も出さない）」と「スヌーズの失敗（失敗の文言と再試行）」を見分ける（実装の手順9で決めた） |
 | `src/features/smart-alarm/smart-alarm.store.ts` | 受け口 | 画面をまたぐ状態（Zustand）：設定中のアラーム（読み込み中・読めた・失敗）、最後の操作の結果の文言と案内、処理中の印。操作（読み直す・設定・解除・スヌーズの処理・設定を開く）。一覧の入口・アラームの画面・アプリを開いた理由の処理が同じ状態を使うため |
-| `src/features/smart-alarm/use-smart-alarm.ts` | 受け口 | アラームの画面のフック。使う値（窓口で DB を読む。01 の DB の読み取りは同期関数なので、01 の一覧と同じく描画の中で読み、読み込み中の状態はない。読むのは画面を開いたときと、前面に戻ったとき（`AppState` を見る）だけで、きっかけの回数が変わったときだけ読み直す。3.1「例外の扱い」）、今から寝るの候補、起床時刻を指定の入力と候補、store の状態を、整形済みの画面用の状態にする。候補の押下・解除・設定を開く・再試行を受ける。「今」を描画のたびに取るため `'use no memo'`（02 と同じ）。今は `@/lib/clock` の `now` で取り、store の操作を通してサービス層へ引数で渡す（architecture.md「副作用の分離」。01 の store の `getNow` と同じ形） |
+| `src/features/smart-alarm/use-smart-alarm.ts` | 受け口 | アラームの画面のフック。使う値（窓口で DB を読む。01 の DB の読み取りは同期関数なので、01 の一覧と同じく描画の中で読み、読み込み中の状態はない。読むのは画面を開いたときと、前面に戻ったとき（`AppState` を見る）だけで、きっかけの回数が変わったときだけ読み直す。3.1「例外の扱い」）、今から寝るの候補、起床時刻を指定の入力と候補、store の状態を、整形済みの画面用の状態にする。候補の押下・解除・設定を開く・再試行を受ける。「今」を描画のたびに取るため `'use no memo'`（02 と同じ）。今は `@/lib/clock` の `now` で取る（候補の計算はフック、設定・スヌーズの操作では store が取ってサービス層へ引数で渡す。architecture.md「副作用の分離」。01 の store の `getNow` と同じ形） |
 | `src/features/smart-alarm/smart-alarm-screen.tsx` | 受け口 | アラームの画面。設定中のアラーム・解除、操作の結果と案内、使う値の説明、今から寝るの候補、起床時刻を指定（時刻の入力と候補）。表示と操作の受け付けだけ |
 | `src/features/smart-alarm/smart-alarm-time-input.tsx` | 受け口 | 時と分を入れる部品。押すと OS の時刻ピッカーを出し、選んだ時と分を返すだけ（iOS・Android の出し方の違いはここに閉じる） |
 | `src/features/smart-alarm/smart-alarm-entry.tsx` | 受け口 | 一覧の上に置く入口：「アラーム 6:58」「アラーム 未設定」のボタン。押すとアラームの画面へ |
-| `src/features/smart-alarm/use-smart-alarm-entry.ts` | 受け口 | 入口のフック：store の設定中のアラームを文言にし、`openAlarm`（`/alarm` へ移る）を返す。開いたときに読み直す |
+| `src/features/smart-alarm/use-smart-alarm-entry.ts` | 受け口 | 入口のフック：store の設定中のアラームを文言にし、`openAlarm`（`router.navigate('/alarm')`。続けて押しても積み増さない）を返す。開いたときに読み直す |
 | `src/features/smart-alarm/smart-alarm-handoff-provider.tsx` | 受け口 | 起動時と前面復帰時に、アプリを開いた理由を処理する部品。設定中のアラームの読み直しは前面復帰時だけ（起動時は入口・アラームの画面が開いたときに読む。3.1「設定中のアラーム」）（01 の `SleepRecordSyncProvider` と同じ形）。子を描画するだけ |
-| `src/features/smart-alarm/use-smart-alarm-handoff.ts` | 受け口 | 上の部品のフック：`AppState` と、ライブラリの操作のイベント（リポジトリの購読の関数を store 経由で受ける）を見て store のスヌーズの処理を呼び、スヌーズを処理したらアラームの画面へ移る。起動直後に移るのは、根っこのレイアウトが `<Stack />` を描いたあと（SDK 58 のドキュメント：移る前に根っこのレイアウトが最初の描画で画面の部品を描いていること。`useRootNavigationState` の `key` で待つ方法はドキュメントにないので使わない。2026-11-28 の手順9で確かめた）。この部品の処理はライブラリの呼び出しを待ってから移るので、`<Stack />` の描画のあとになる。準備前の移動の警告・エラーが出ないことを T130 で確かめる |
+| `src/features/smart-alarm/use-smart-alarm-handoff.ts` | 受け口 | 上の部品のフック：`AppState` と、ライブラリの操作のイベント（アラーム操作の窓口 `subscribeAlarmActions` で受ける。窓口はリポジトリの購読の関数を呼ぶだけ）を見て store のスヌーズの処理を呼び、スヌーズを処理したらアラームの画面へ移る。起動直後に移るのは、根っこのレイアウトが `<Stack />` を描いたあと（SDK 58 のドキュメント：移る前に根っこのレイアウトが最初の描画で画面の部品を描いていること。`useRootNavigationState` の `key` で待つ方法はドキュメントにないので使わない。2026-11-28 の手順9で確かめた）。この部品の処理はライブラリの呼び出しを待ってから移るので、`<Stack />` の描画のあとになる。準備前の移動の警告・エラーが出ないことを T130 で確かめる |
 
 #### 画面ルート（`src/app/`）
 | パス | 内容 |
@@ -213,7 +215,7 @@
 | `tests/e2e/alarm-flow.yaml`（新規） | E5（`tags: [android]`） |
 | `tests/e2e/alarm-ring.yaml`（新規） | E6（`tags: [android]`） |
 | `tests/e2e/seed/sleep-seed.js` | 「14日分」のときに出る使う値の説明の文字列（`output.alarmParams`）を足す。E6 のための「今から2分後」の時と分と希望の時刻のボタンの文字（`output.ringHour`・`ringMinute`・`ringLabel`）も足す（シードの睡眠は変えない。01・02 の期待値が変わるため）。シード「14日分」は深い睡眠から始まりレムが1晩に1回なので、入眠は実績の0分、サイクル長は標準値の90分になる |
-| `tests/e2e/subflows/clear-alarm.yaml`（新規） | アラームを全部解除するサブフロー（E5・E6 の準備と後始末） |
+| `tests/e2e/subflows/clear-alarm.yaml`（新規） | アラームを全部解除するサブフロー（E5・E6 の準備と後始末）。どの画面で呼ばれても一覧から始めるよう、最初にアプリを開き直す（データは消さない。impl レビューで足した） |
 | `tests/e2e/subflows/set-ring-in-two-minutes.yaml`（新規） | 起きたい時刻を「今から2分後」にして希望の時刻の候補を押すサブフロー（E6。実装の手順10で分けた） |
 | `tests/e2e/seed/first-time.js`（新規） | Maestro の `copyTextFrom` で写した候補の文字から、先頭の「H:MM」を取り出す（E5。実装の手順10で足した） |
 | `tests/e2e/seed/README.md` | フローの一覧に E5・E6 を足す |
@@ -251,7 +253,8 @@
 - iOS：スヌーズのボタンでアプリが開くあいだに音が鳴り続けるか、スヌーズのあとに最初の鳴動が止まり9分後に鳴るか、スヌーズ中の表示
 - 両方：鳴ったあと・止めたあとの予定の `phase`（`scheduled` のまま残らないか）、`cancelAlarmAsync` でスヌーズの予定も消えるか
 - Android：通知の許可がなくても鳴るか、`USE_EXACT_ALARM` で正確なアラームの許可が最初からあるか、全画面表示の許可がないときの鳴り方、5分で鳴り止むか、`launchUri` を指定しないときにスヌーズのボタンでアプリの最初の画面が開くか
-- iOS：ロック画面のスヌーズのボタンからアプリが開くとき、`AppState` が `background` → `active` を通るか（通らなければ前面復帰の条件を見直す）
+- iOS：ロック画面のスヌーズのボタンからアプリが開くとき、`AppState` が `background` → `active` を通るか（`background` → `inactive` → `active` なら理由を読まないので、前面復帰の条件を見直す）
+- 消去に失敗した理由が残ったまま、スヌーズの鳴動が鳴っている間に（10分以内に）アプリを前面に出すと、新しい鳴動にもスヌーズがかかるか（ライブラリが新しい鳴動で理由を上書きするかによる。impl レビューの P2）
 - 時刻ピッカーの見た目と操作（iOS・Android）。今は OS で出し方を分けず、`onChange` が来たら閉じる。iOS の回転式でホイールが止まるたびに `onChange` が来て1回で閉じるか、Android で描き直しのときにダイアログが二重に出るか（ライブラリは Android で命令形の `DateTimePickerAndroid.open` を勧める）を確かめ、起きれば OS で分ける（impl レビューの P2。実機で決める）
 - 決まっていないこと：iOS の実機は Apple Developer Program の登録が要る（未決）。登録しない間は Android のエミュレータ（E5・E6）だけで確かめる
 
@@ -346,7 +349,7 @@
 - U1 の追加：`tests/unit/features/sleep-record/sleep-record-day.service.test.ts`
 - I7：`tests/integration/features/sleep-record/sleep-record-query.service.test.ts`（既存に足す）
 - I8：`tests/integration/features/smart-alarm/smart-alarm-operation.service.test.ts`（I8-9・I8-10 は `smart-alarm-params.service.test.ts`）
-- I9：`tests/integration/features/smart-alarm/smart-alarm-screen.test.tsx`（I9-12 の T121 だけは、前面復帰で読み直す部品が手順9でできるため `smart-alarm-handoff.test.tsx` に置く）、I10：`tests/integration/features/smart-alarm/smart-alarm-handoff.test.tsx`
+- I9：`tests/integration/features/smart-alarm/smart-alarm-screen.test.tsx`（I9-12 の T121 だけは、前面復帰で読み直す部品が手順9でできるため `use-smart-alarm-handoff.test.tsx` に置く）、I10：`tests/integration/features/smart-alarm/use-smart-alarm-handoff.test.tsx`（対象のフックのファイル名に合わせる。01 の `use-sleep-record-sync.test.tsx` と同じ。impl レビューで改名）
 - I4 の追加：`tests/integration/features/sleep-record/sleep-record-list-screen.test.tsx`
 - I11：`tests/integration/features/smart-alarm/smart-alarm-entry.test.tsx`
 - E5：`tests/e2e/alarm-flow.yaml`、E6：`tests/e2e/alarm-ring.yaml`
@@ -499,6 +502,7 @@
 | T050 | DB にシード E、今 `2026-11-28T23:34` | 使う値を読む | 入眠：実績 8。サイクル：標準値 90、足りない日数 1（範囲の前の端 `10-30` は数え、`10-29` は数えない） | I8-9 |
 | T051 | DB にシード E と、帰属日 `11-28`（今日）の主睡眠（サイクル値あり） | 使う値を読む | サイクル：実績 95（今日も数える） | I8-9 |
 | T052 | テスト用DBを閉じる | 使う値を読む | DB のエラーを投げる。`sleepRecord.loadMainSleeps` の error ログが1件 | I8-10 |
+| T146 | DB にシード E、今 `2026-11-29T00:30+09:00`（UTC ではまだ 11-28） | 使う値を読む | 範囲は `2026-10-31`〜`2026-11-29`（日本時間の今日から）なので `10-30` は数えず、入眠：標準値 14、足りない日数 1（UTC の日付で範囲を作ると `10-30` を数えて実績になる） | I8-9 |
 
 ### 手順6 アラーム操作の窓口（中間）：`tests/integration/features/smart-alarm/smart-alarm-operation.service.test.ts`
 今の時刻は `getNow` で渡し、`jest.setSystemTime` も同じ時刻にする（偽物の次の鳴動は `Date.now()` から計算するため。項目で今を変えるときは両方を変える）。既定は `2026-11-28T23:34:00`。候補の時刻の既定は `2026-11-29T05:48:00`。
@@ -538,7 +542,9 @@
 | T089 | T076 の理由に `trigger: false` を付ける | スヌーズの処理 | 延期する（T076 と同じ） | I8-7 |
 | T126 | 予約なし | 設定を2回（5:48、続けて 7:18） | 許可の要求（`requestPermissionsAsync`）が2回呼ばれる（結果を覚えない） | I8-1 |
 | T128 | T076 の前提でスヌーズを処理する（延期は成功）。理由は消さずに、今の鳴動を `null` にし（元の鳴動 A は `completed`）、今を 07:05:00 へ進める | もう一度スヌーズの処理を呼ぶ | 延期は呼ばれず（1回のまま）、スヌーズ済みとして、すでにある `deferred` の予定の時刻 7:09:30 を返す。`SnoozeOccurrenceNotFoundError` にならない | I8-13 |
-| T129 | 押した時刻が `NaN` | 設定 | 許可の要求・予約は呼ばない。設定しなかった結果（無効な時刻。store が「アラームを設定できませんでした」にする）を返す。ログは出ない | I8-3 |
+| T129 | 押した時刻が（`it.each`）`NaN`／`Infinity`／`-Infinity` | 設定 | 許可の要求・予約は呼ばない。設定しなかった結果（無効な時刻。store が「アラームを設定できませんでした」にする）を返す。ログは出ない | I8-3 |
+| T147 | T076 の前提で、今の鳴動を（`it.each`）`{ id: A, occurrenceId: 'A-def-1', state: 'countdown' }`（予定に `A-def-1` の `scheduled`・`deferred`（7:09:30）、元の A は `completed`）／`{ id: A, occurrenceId: 'A', state: 'alerting' }` | スヌーズの処理 | `countdown` は延期を呼ばず、スヌーズ済みとして 7:09:30 を返す。`alerting` は `A` で延期する（T076 と同じ） | I8-7 |
+| T154 | T147 の `countdown` の前提で、予定に `deferred` の `scheduled` がない | スヌーズの処理 | 延期を呼ばず、`SnoozeOccurrenceNotFoundError` を投げる | I8-8 |
 
 ### 手順7 一覧の部品の枠（中間）：`tests/integration/features/sleep-record/sleep-record-list-screen.test.tsx`（既存に足す・直す）
 | ID | 前提 | 操作 | 期待結果 | 対応 |
@@ -557,6 +563,7 @@
 | T094 | 予定 `11-29` 5:48 の `scheduled`／`11-29` 7:09 の `deferred` | 一覧を開く | 「アラーム 11月29日（日） 5:48」／「アラーム 11月29日（日） 7:09（スヌーズ）」 | I11-1 |
 | T095 | 予定の読み取りを止めておく | 一覧を開く | 読み取りが終わるまで「アラーム」だけ。再開すると「アラーム 未設定」 | I11-2・I9-8 |
 | T096 | 予定の読み取りが失敗する | 一覧を開く | 「アラーム」だけ（「未設定」にならない） | I11-2 |
+| T153 | 予約なし | 入口「アラーム 未設定」を描き直しの前に2回続けて押す | `/alarm` は1枚だけ（戻る操作1回で一覧になる） | I11-1 |
 
 ### 手順8 アラームの画面（中間）：`tests/integration/features/smart-alarm/smart-alarm-screen.test.tsx`
 | ID | 前提 | 操作 | 期待結果 | 対応 |
@@ -582,14 +589,16 @@
 | T118 | DB に睡眠なしで画面を開いている | DB にシード E を入れる → 今を 23:35:00 に進め、再描画だけをする（store に同じ値を入れ直して、購読している画面を描き直させる。RNTL の `rerender` は `renderRouter` の画面に使えないため）→ `AppState` を `background` → `active` にする | 再描画で「就寝予定 23:35」に替わる（描き直されたことの確認）が、使う値の説明は標準値（T100 の文字）のまま。前面に戻ると「入眠 8分（あなたの記録）・1サイクル 90分（標準値。あと 1日分の記録で切り替わります）」になる | I9-10 |
 | T119 | DB に睡眠なしで画面を開いている | DB にシード E を入れる → 一覧へ戻ってから、もう一度アラームの画面を開く | 「入眠 8分（あなたの記録）・1サイクル 90分（標準値。あと 1日分の記録で切り替わります）」 | I9-10 |
 | T120 | 画面を開いている | 今を（`it.each`）`2026-11-29T05:48:00`（ちょうど）／`05:48:30` へ進め、描き直さずに「5:48 4サイクル…」を押す | どちらも「その時刻は過ぎています」。予約されない | I9-11 |
-| T121 | 予定の読み取りを止められるようにして画面を開く（手順9のファイルの既定の前提のうち、今 07:00:30 だけを使う。理由・鳴動は置かない） | `background` → `active` で読み直しを始め、その読み直しの予定の読み取り（前面復帰のあとの次の1回だけ。`mockImplementationOnce`）を止める。設定の中の取り消す ID を集める読み取りは止めない → 「13:14 4サイクル（6時間14分後）」（このファイルの今 07:00:30 からの候補）を押して設定し、設定のあとの読み直しが終わる → 止めていた読み直しを、予約がない古い結果で終わらせる | 新しい設定の「次のアラーム …」の完全な文字列のまま（テストは手順9のファイル `smart-alarm-handoff.test.tsx` に置き、そのファイルの今 07:00:30 なので「次のアラーム 13:14」）（古い結果で「アラームは設定されていません」にならない） | I9-12 |
+| T121 | 予定の読み取りを止められるようにして画面を開く（手順9のファイルの既定の前提のうち、今 07:00:30 だけを使う。理由・鳴動は置かない） | `background` → `active` で読み直しを始め、その読み直しの予定の読み取り（前面復帰のあとの次の1回だけ。`mockImplementationOnce`）を止める。設定の中の取り消す ID を集める読み取りは止めない → 「13:14 4サイクル（6時間14分後）」（このファイルの今 07:00:30 からの候補）を押して設定し、設定のあとの読み直しが終わる → 止めていた読み直しを、予約がない古い結果で終わらせる | 新しい設定の「次のアラーム …」の完全な文字列のまま（テストは手順9のファイル `use-smart-alarm-handoff.test.tsx` に置き、そのファイルの今 07:00:30 なので「次のアラーム 13:14」）（古い結果で「アラームは設定されていません」にならない） | I9-12 |
 | T122 | （`it.each`）許可の要求が失敗する／許可の結果 `unavailable` | 候補を押す | 「アラームを設定できませんでした」／「この端末ではアラームを使えません」（「設定を開く」なし）。予約されない | I9-5・I9-7 |
 | T123 | 就寝予定を選ばない。画面を開いている | 今を 23:35:00 に進め、`AppState` は変えずに、T118 と同じ方法で同じ画面を描き直す（ほかの状態は変えない） | 「就寝予定 23:35」と、今から寝るの候補「5:49 4サイクル（6時間14分後）」…に替わる（描画のたびに今を取ることを確かめる。React Compiler を通した変換で） | I9-3 |
 | T124 | （`it.each`）許可の結果 `canUseFullScreenIntent: false` で候補を押す（設定の成功と全画面表示の案内と「設定を開く」が出る）／許可の結果 `denied` で候補を押す（許可の案内と「設定を開く」が出る。予約なし）のあと、許可の結果を既定に戻して | 「5:48 4サイクル…」を押してから「解除」を押す | 前の案内と「設定を開く」が消え、「アラームを解除しました」だけが出る | I9-6 |
 | T125 | 予定の読み取りを止めておく | アラームの画面を初期 URL `/alarm` で開く → 読み取りを終わらせる | 止めている間、「次のアラーム」「アラームは設定されていません」「アラームの状態を読み込めませんでした」「解除」のどれも出ず、今から寝るの候補は押せる。終わると「アラームは設定されていません」 | I9-8 |
 | T127 | 許可の結果 `denied`、設定を開く関数が2回とも `false` | 候補を押して案内を出し、「設定を開く」を2回押す | 「設定を開けませんでした」は1つだけ出る。同じ key の警告（`console.error`）が出ない | I9-5 |
+| T148 | （`it.each`）`NaN`／`Infinity` | store の設定を直接呼ぶ | 「アラームを設定できませんでした」 | I9-7 |
+| T149 | （`it.each`）①予約なしで、設定（5:48）の許可の要求を止めている間に、設定（7:18）を呼ぶ／②予約 A があり、解除の予約の一覧の読み取りを止めている間に、解除を呼ぶ／③予約なしで、設定（5:48）の許可の要求を止めている間に解除を呼ぶ／④予約 A があり、解除の予約の一覧の読み取りを止めている間に、設定（5:48）を呼ぶ（どれも store を直接呼び、止めていたものを再開する） | 2回目の呼び出しは何もしない。①予約は 5:48 の1件だけ、②予約の一覧の読み取りは1回・`cancelAlarmAsync('A')` は1回、③予約は 5:48 の1件が残り取り消しは呼ばれない、④予約は呼ばれず、A は取り消される | I9-7 |
 
-### 手順9 アプリを開いた理由（中間）：`tests/integration/features/smart-alarm/smart-alarm-handoff.test.tsx`
+### 手順9 アプリを開いた理由（中間）：`tests/integration/features/smart-alarm/use-smart-alarm-handoff.test.tsx`
 今 `2026-11-29T07:00:30`。理由の既定は `{ action: 'secondaryOpen', alarmId: A, timestamp: 07:00:10 }`、今の鳴動 `{ id: A, occurrenceId: A }`、A の予定は `ringing`。スヌーズの次の鳴動は 7:09:30。
 | ID | 前提 | 操作 | 期待結果 | 対応 |
 | --- | --- | --- | --- | --- |
@@ -608,7 +617,7 @@
 | T142 | 理由 `nativeStop`、消去が失敗する | アプリを読み込む | 画面は一覧のまま。「スヌーズを設定できませんでした」「…にもう一度鳴ります」「再試行」のどれも出ない。`smartAlarm.snooze` の error ログ | I10-7 |
 | T143 | （`it.each`）理由の読み取りが1回だけ失敗する／延期が1回だけ失敗する | アプリを読み込む → 今を 07:00:40 に進める → `background` → `active` | 2回目（前面復帰）で延期され、`/alarm` に「7:09 にもう一度鳴ります」（次の鳴動は 7:09:40 で表示は 7:09）。前に出ていた「スヌーズを設定できませんでした」と「再試行」は出ていない | I10-2・I10-3 |
 | T144 | 延期の結果が `resolvedWithoutNext`、理由の消去も失敗する | アプリを読み込む | `/alarm` に「スヌーズを設定できませんでした」。「再試行」は出ない。`smartAlarm.snooze` の error ログ | I10-6・I10-7 |
-| T145 | アプリを開いて一覧を出している（前面のまま） | 理由（スヌーズ）を置き、ライブラリの操作のイベント（`onAlarmAction`）を流す（`AppState` は変えない） | 延期が1回呼ばれ、アラームの画面に「7:09 にもう一度鳴ります」 | I10-2 |
+| T145 | アプリを開いて一覧を出している（前面のまま） | 理由（スヌーズ）を置き、中身が `{ action: 'nativeStop' }` のライブラリの操作のイベント（`onAlarmAction`）を流す（中身は使わず、保存された理由を読むことの確認）（`AppState` は変えない） | 延期が1回呼ばれ、アラームの画面に「7:09 にもう一度鳴ります」 | I10-2 |
 
 ### 手順10 E2E（Maestro、Android）：`tests/e2e/`
 | ID | 前提 | 操作 | 期待結果 | 対応 |
@@ -622,6 +631,7 @@
 - 2026-11-28 test 合格（3ラウンド。3ラウンド目の P1 3 を直したあと、再レビューせず人間の判断で合格。P2 は直し済み。レビューを受けて設計書の 3.1（候補までの時間の基準・許可の表の当て方・`trigger: true` の理由・今の鳴動を「取れない」とみなす条件・消去の失敗の表示）・3.5・5 も直した）
 - 2026-11-28 test 合格（実装の手順7で T099 を足して再レビュー。2ラウンド：P1 2→3 を直したあと、再レビューせず人間の判断で合格。P2 は直し済み。レビューを受けて 3.1・3.3・3.4 を補足）
 - 2026-11-28 test 合格（impl 1ラウンド目の指摘で T127〜T129・T145 を足して再レビュー。1ラウンド：P1 1 を直したあと、再レビューせず人間の判断で合格。P2 は直し済み）
+- 2026-11-28 test 合格（impl 3ラウンド目の指摘で T146〜T149・T153・T154 を足して再レビュー。1ラウンド：P1 2 を直したあと、再レビューせず人間の判断で合格。P2 の一部は TODO）
 
 ## 修正履歴
 <!-- 既存機能の修正時に1行ずつ追記する（例：- 2026-12-01 ログイン失敗時のロック回数を5回に変更） -->
