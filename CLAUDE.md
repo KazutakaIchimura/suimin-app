@@ -9,7 +9,8 @@
 - 状態管理：Zustand
 - ヘルスケア連携（読み取りのみ）：iOS は `@kingstinct/react-native-healthkit`、Android は `react-native-health-connect`
 - 端末内DB：`expo-sqlite` ＋ Drizzle ORM（マイグレーションは `drizzle-kit` で生成）
-- アラーム：[要相談]（iOS はアプリを閉じていても鳴らし続ける仕組みに制約があるため、設計時に方式を決める）
+- アラーム：`react-native-alarm-scheduler`（OS の本物のアラーム。iOS は AlarmKit で iOS 26 以上が必要、Android は `AlarmManager.setAlarmClock`）。ライブラリを呼ぶのはリポジトリ層の1ファイルだけにする（作者が1人のライブラリなので、差し替えられるようにする）
+- 時刻の入力：`@react-native-community/datetimepicker`（OS の時刻ピッカー）
 - グラフ：`victory-native`
 - ログ：ライブラリは使わず、`src/lib/logger.ts` の共通ログ関数を使う
 - テスト：単体・中間は Jest（`jest-expo`）＋ React Native Testing Library、E2E は Maestro
